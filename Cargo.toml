@@ -1,0 +1,7 @@
+[package]
+name = "jay"
+version = "0.2.0"
+authors = ["foxcirc <whyfoxcirc@gmx.de>"]
+edition = "2018"
+
+[dependencies]
