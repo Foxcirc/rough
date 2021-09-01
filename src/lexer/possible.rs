@@ -18,6 +18,12 @@ use crate::lexer::token::token::*;
 #[derive(Debug)]
 pub(crate) struct Possible([bool; 11]);
 
+impl Default for Possible {
+    fn default() -> Self {
+        Self([false, 11])
+    }
+}
+
 impl Possible {
     /// Clears all flags.
     /// This may actually be undefined behaviour
