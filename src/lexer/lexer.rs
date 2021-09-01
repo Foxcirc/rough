@@ -94,9 +94,13 @@ impl <'b>Lexer<'b> {
         }
 
         // Skip over spaces and tabs, encountered while there's no matching going on.
-        while matches!(self.text.peek().unwrap(), ' ' | '\t') {
-            self.text.next().unwrap();
-        };
+        loop {
+            match self.text.peek() {
+                Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
+                None => return None,
+                _ => ()
+            }
+        }
         
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
@@ -115,7 +119,7 @@ impl <'b>Lexer<'b> {
             // may be the start of another one.
             self.current = match self.branch.next() {
                 Some(v) => v,
-                None => return None
+                None => unreachable!()
             };
             
             // println!("{:?}", self.current);
