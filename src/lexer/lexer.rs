@@ -151,7 +151,6 @@ impl <'b>Lexer<'b> {
             // There is only one possibility for the kind of token left.
             if set == 1 { break; }
 
-
         }
 
         self.kind = self.possible.only();
