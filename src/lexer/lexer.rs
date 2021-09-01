@@ -117,7 +117,7 @@ impl <'b>Lexer<'b> {
                 let set = self.possible.set();
                 
                 // Skip over spaces and tabs, encountered while there's no matching going on.
-                if set == 0 && matches!(self.current, 's' | '\t') { self.text.next(); continue; };
+                if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
                 
                 //? Check if this is the end of a token. The end is
                 //? considered when there  *would* be no more valid
