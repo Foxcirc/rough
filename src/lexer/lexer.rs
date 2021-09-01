@@ -137,7 +137,6 @@ impl <'b>Lexer<'b> {
                 // If there are currently no possible tokens, and this char also ins't valid for any,
                 // the character is invalid. This *should* never happen.
                 if set == 0 {
-                    let _x = 1;
                     panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current)
                 }
         
