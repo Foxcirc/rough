@@ -5,7 +5,7 @@ use crate::lexer::token::token::*;
 /// Implemented for Possible.
 /// This trait abstracts the checking if specific combinations of chars
 /// are valid for a specific TokenKind.
-trait Check {
+pub(crate) trait Check {
     /// Update the flags according to chr.
     fn update(&mut self, chr: char, prev: char);
     /// Peek how many flags would be valid after a call to Char::update(chr).
