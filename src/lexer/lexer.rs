@@ -89,6 +89,10 @@ impl <'b>Lexer<'b> {
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
+        if *self.text.peek().unwrap() == ' ' {
+            let _x = 1;
+        }
+
         // Skip over spaces and tabs, encountered while there's no matching going on.
         while matches!(self.text.next().unwrap(), ' ' | '\t') {};
         
