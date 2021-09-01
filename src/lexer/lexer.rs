@@ -94,7 +94,7 @@ impl <'b>Lexer<'b> {
         }
 
         // Skip over spaces and tabs, encountered while there's no matching going on.
-        while matches!(self.text.next().unwrap(), ' ' | '\t') {};
+        while matches!(*self.text.peek().unwrap(), ' ' | '\t') {};
         
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
