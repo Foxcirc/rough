@@ -12,7 +12,7 @@
 /// 5  Float
 /// ------------------------------------------------------------
 #[derive(Debug)]
-struct Possible([bool; 11]);
+pub(crate) struct Possible([bool; 11]);
 
 impl Possible {
     /// Clears all flags.
