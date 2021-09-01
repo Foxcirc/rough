@@ -245,7 +245,7 @@ impl Possible {
     /// is UnDeFiNeD bEhAVioUr, just kidding
     /// there's a check.
     pub(crate) fn only(&self) -> TokenKind {
-        assert!(self.set() == 1);
+        // assert!(self.set() == 1);
         
         return
             
