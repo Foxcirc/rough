@@ -128,10 +128,10 @@ impl <'b>Lexer<'b> {
                 // is updated with the current char. 
                 if self.possible.peek(self.current, self.previous) == 0 {
                     
-                    // // This is an Integer token. Every integer is also a valid float, so clear the float flag.
-                    // if set == 2 && self.possible[TokenKind::Integer] && self.possible[TokenKind::Float] {
-                    //     self.possible[TokenKind::Float] = false;
-                    // }
+                    // This is an Integer token. Every integer is also a valid float, so clear the float flag.
+                    if set == 2 && self.possible[TokenKind::Integer] && self.possible[TokenKind::Float] {
+                        self.possible[TokenKind::Float] = false;
+                    }
                     
                     assert!(self.possible.set() == 1);
                     break;
