@@ -156,7 +156,7 @@ impl <'b>Lexer<'b> {
             let set = self.possible.set();
             
             // There is only one possibility for the kind of token left.
-            if set == 1 { break; }
+            // if set == 1 { break; }
 
             // There are no possible kinds of token left. This should never happen.
             else if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
