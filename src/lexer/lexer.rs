@@ -137,7 +137,6 @@ impl <'b>Lexer<'b> {
                 
             let set = self.possible.set();
             
-            println!("{:?}, {:?}", self.current, set);
 
             if self.current == ' ' { println!("Whitespace here..."); }
 
