@@ -30,6 +30,10 @@ fn matching() {
         
         ".to_owned();
 
+        let mut test: String = "
+111             222
+        ".to_owned();
+
     let lexer = Lexer::new(&mut test);
     // Build the TokenStream
     let stream = lexer.run();
