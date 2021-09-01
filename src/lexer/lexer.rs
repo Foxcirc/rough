@@ -137,6 +137,8 @@ impl <'b>Lexer<'b> {
 
                 // Check if there would be no more possibilities left after self.possible
                 // is updated with the current char. 
+                // This is only for tokens, wich consist of more then one character,
+                // like Integers or Identifiers.
                 if self.possible.peek(self.current, self.previous) == 0 {
                     
                     // This is an Integer token. Every integer is also a valid float, so clear the float flag.
