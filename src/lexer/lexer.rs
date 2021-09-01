@@ -136,7 +136,9 @@ impl <'b>Lexer<'b> {
                 
                 // If there are currently no possible tokens, and this char also ins't valid for any,
                 // the character is invalid. This *should* never happen.
-                if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
+                if set == 0 { 
+                    panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current)
+                }
         
                 // This is an Integer token. Every integer is also a valid float, so clear the float flag.
                 if set == 2 && self.possible[TokenKind::Integer] && self.possible[TokenKind::Float] {
