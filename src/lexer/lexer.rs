@@ -84,7 +84,7 @@ impl <'b>Lexer<'b> {
         //* ... it is elegant though, at least from my perspective
         
         // Skip over spaces and tabs, encountered while there's no matching going on.
-        if matches!(self.text.next().unwrap(), ' ' | '\t') {  continue; };
+        while let ' ' | '\t' = self.text.next().unwrap() {};
         
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
