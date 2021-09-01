@@ -168,20 +168,20 @@ impl <'b>Lexer<'b> {
     
             TokenKind::Integer   => {
     
-                // loop {
-                //     self.current = *self.text.peek().expect("Lexer: Iterator drained while building token.");
+                loop {
+                    self.current = *self.text.peek().expect("Lexer: Iterator drained while building token.");
                     
-                //     // Store chars until the next whitespace.
-                //     if !matches!(self.current, '0'..='9' | '_') { break; }
+                    // Store chars until the next whitespace.
+                    if !matches!(self.current, '0'..='9' | '_') { break; }
                     
-                //     // Don't push the undercores, since these are invalid for an integer.
-                //     if !matches!(self.current, '_') { 
-                //         self.buffer.push(self.current);
-                //     }
+                    // Don't push the undercores, since these are invalid for an integer.
+                    if !matches!(self.current, '_') { 
+                        self.buffer.push(self.current);
+                    }
                     
-                //     // Advance the iterator.
-                //     self.text.next();
-                // }
+                    // Advance the iterator.
+                    self.text.next();
+                }
                 
                 let result = isize::from_str_radix(&self.buffer, 10).expect(&format!("Lexer: Could not build token for sequence '{}', invalid sequence for <Integer>", self.buffer));
                 Token::Integer(result)
@@ -189,20 +189,20 @@ impl <'b>Lexer<'b> {
             
             TokenKind::Float   => {
                 
-                // loop {
-                //     self.current = *self.text.peek().expect("Lexer: Iterator drained while building token.");
+                loop {
+                    self.current = *self.text.peek().expect("Lexer: Iterator drained while building token.");
                     
-                //     // Store chars until the next whitespace.
-                //     if !matches!(self.current, '0'..='9' | '_' | '.') { break; }
+                    // Store chars until the next whitespace.
+                    if !matches!(self.current, '0'..='9' | '_' | '.') { break; }
                     
-                //     // Don't push the undercores, since these are invalid for an integer.
-                //     if !matches!(self.current, '_') { 
-                //         self.buffer.push(self.current);
-                //     }
+                    // Don't push the undercores, since these are invalid for an integer.
+                    if !matches!(self.current, '_') { 
+                        self.buffer.push(self.current);
+                    }
 
-                //     // Advance the iterator.
-                //     self.text.next();
-                // }
+                    // Advance the iterator.
+                    self.text.next();
+                }
     
                 let result = self.buffer.parse().expect(&format!("Lexer: Could not build token for sequence '{}', invalid sequence for <Float>", self.buffer));
                 Token::Float(result)
