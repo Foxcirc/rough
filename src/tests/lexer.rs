@@ -28,11 +28,11 @@ fn matching() {
         )/
         1_.2+-*/(+/-/*)((\t\t)) - - -  ***
         
-        ".to_owned();
+    ".to_owned();
 
-        let mut test: String = "
+    let mut test: String = "
 111             222
-        ".to_owned();
+    ".to_owned();
 
     let lexer = Lexer::new(&mut test);
     // Build the TokenStream
