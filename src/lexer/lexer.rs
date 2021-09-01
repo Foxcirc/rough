@@ -56,7 +56,7 @@ impl <'b>Lexer<'b> {
             previous: '\0',
             buffer: String::new(),
             kind: TokenKind::Empty,
-            possible: Possible([false; 11]),
+            possible: Possible::default(),
             cursor: [0, 0, 0]
         }
     }
