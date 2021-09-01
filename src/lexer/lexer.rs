@@ -83,6 +83,11 @@ impl <'b>Lexer<'b> {
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
+        // Skip over spaces and tabs, encountered at the start of a sequence.
+        // There are never going to be any of these characters at the end of a sequence,
+        // because they will terminate any token.
+        while matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
+
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
         self.buffer.clear();
@@ -117,9 +122,7 @@ impl <'b>Lexer<'b> {
                 // }            
                 
                 let set = self.possible.set();
-                
-                // Skip over spaces and tabs, encountered while there's no matching going on.
-                if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
+
 
                 // Check if there would be no more possibilities left after self.possible
                 // is updated with the current char. 
