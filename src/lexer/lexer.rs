@@ -1,8 +1,8 @@
 
 use std::str::Chars;
 use std::iter::Peekable;
-use std::ops::{Index, IndexMut};
-use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind, Symbol, Brace}};
+use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind}};
+use crate::lexer::possible::Possible;
 // use super::error::{Error, ErrorKind, /* Step */};
 
 /// The Lexer converts Text to a Stream of Tokens.
