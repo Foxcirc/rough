@@ -137,9 +137,6 @@ impl <'b>Lexer<'b> {
                 
             let set = self.possible.set();
             
-
-            if self.current == ' ' { println!("Whitespace here..."); }
-
             // // Skip over spaces and tabs, encountered while there's no matching going on.
             // if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
 
