@@ -103,7 +103,7 @@ impl <'b>Lexer<'b> {
                 None => return None
             };
             
-            if self.current == '1' { //* remove
+            if self.current == '1' { //* for debugging purposes
                 let _x = 1;
             }
             // // Advance the cursor, the line only if the character is a newline.
