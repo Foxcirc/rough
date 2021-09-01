@@ -20,7 +20,7 @@ pub(crate) struct Possible([bool; 11]);
 
 impl Default for Possible {
     fn default() -> Self {
-        Self([false, 11])
+        Self([11; fale])
     }
 }
 
