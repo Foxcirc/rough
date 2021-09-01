@@ -341,8 +341,8 @@ impl Check for Possible {
         self[TokenKind::Brace(Brace::NormalOpen)]  = matches!(chr, '(') && set == 0;
         self[TokenKind::Brace(Brace::NormalClose)] = matches!(chr, ')') && set == 0;
        
-        self[TokenKind::Integer]                   = matches!(chr, '0'..='9' | '_')       && (set == 0 ||  self[TokenKind::Integer]);
-        self[TokenKind::Float]                     = matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || !self[TokenKind::Integer] || self[TokenKind::Float]);
+        self[TokenKind::Integer]                   = matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer]);
+        self[TokenKind::Float]                     = matches!(chr, '0'..='9' | '_' | '.') && ((set == 0 && !self[TokenKind::Integer]) || self[TokenKind::Float]);
     }
     fn peek(&self, chr: char, _prev: char) -> usize {
 
