@@ -98,11 +98,13 @@ impl <'b>Lexer<'b> {
 
             // Get the next character. This uses peek, since the end of one Token
             // may be the start of another one.
-            self.current = match self.text.next() {
+            self.current = match self.branch.next() {
                 Some(v) => v,
                 None => return None
             };
             
+            // println!("{:?}", self.current);
+
             if self.current == '1' { //* for debugging purposes
                 let _x = 1;
             }
@@ -117,7 +119,7 @@ impl <'b>Lexer<'b> {
                 let set = self.possible.set();
                 
                 // Skip over spaces and tabs, encountered while there's no matching going on.
-                if set == 0 && matches!(self.current, ' ' | '\t') { self.branch.next(); continue; };
+                if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
 
                 // Check if there would be no more possibilities left after self.possible
                 // is updated with the current char. 
@@ -135,7 +137,7 @@ impl <'b>Lexer<'b> {
                     assert!(self.possible.set() == 1);
                     break;
             }
-
+            
             // Update self.possible for the current char.
             self.possible.update(self.current, self.previous);
             
