@@ -98,7 +98,7 @@ impl <'b>Lexer<'b> {
             match self.text.peek() {
                 Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
                 None => return None,
-                _ => ()
+                _ => break
             }
         }
         
