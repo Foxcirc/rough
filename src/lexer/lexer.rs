@@ -92,6 +92,15 @@ impl <'b>Lexer<'b> {
         if *self.text.peek().unwrap() == ' ' {
             let _x = 1;
         }
+        
+                //? Skip over spaces and tabs, encountered while there's no matching going on.
+                loop {
+                    match self.text.peek() {
+                        Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
+                        None => return None,
+                        _ => break
+                    }
+                }
 
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
@@ -100,15 +109,6 @@ impl <'b>Lexer<'b> {
         self.previous = self.current;
         self.current = '\0'; //? This is probably reduntant
         self.branch = self.text.clone();
-
-        //? Skip over spaces and tabs, encountered while there's no matching going on.
-        loop {
-            match self.text.peek() {
-                Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
-                None => return None,
-                _ => break
-            }
-        }
         
         //? Loop until the kind of token could be determined.
         loop {
