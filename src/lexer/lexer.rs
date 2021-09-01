@@ -93,7 +93,15 @@ impl <'b>Lexer<'b> {
             let _x = 1;
         }
 
-        // Skip over spaces and tabs, encountered while there's no matching going on.
+        // Clear the old possible tokens. See the 'Clear' trait for more.
+        unsafe { self.possible.clear(); }
+        self.buffer.clear();
+        self.kind = TokenKind::Empty;
+        self.previous = self.current;
+        self.current = '\0'; //? This is probably reduntant
+        self.branch = self.text.clone();
+
+        //? Skip over spaces and tabs, encountered while there's no matching going on.
         loop {
             match self.text.peek() {
                 Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
@@ -102,15 +110,7 @@ impl <'b>Lexer<'b> {
             }
         }
         
-        // Clear the old possible tokens. See the 'Clear' trait for more.
-        unsafe { self.possible.clear(); }
-        self.buffer.clear();
-        self.kind = TokenKind::Empty;
-        self.previous = self.current;
-        self.current = '\0'; //? This is probably reduntant
-        self.branch = self.text.clone();
-        
-        // First loop until the kind of token could be determined.
+        //? Loop until the kind of token could be determined.
         loop {
             
             self.previous = self.current;
@@ -177,6 +177,9 @@ impl <'b>Lexer<'b> {
             if set == 1 { break; }
 
         }
+
+        //? Now, that there's only one possible kind of token left, parse the 
+        //? sequence as that kind of token.
 
         self.kind = self.possible.only();
 
