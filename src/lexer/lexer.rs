@@ -83,8 +83,6 @@ impl <'b>Lexer<'b> {
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
-        println!("Next start with {:?}", self.text.peek().unwrap());
-
         // Skip over spaces and tabs, encountered while there's no matching going on.
         while matches!(self.text.next().unwrap(), ' ' | '\t') {};
         
