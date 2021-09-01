@@ -23,7 +23,7 @@ pub(crate) struct Lexer<'a> {
     branch: Peekable<Chars<'a>>,
     /// Stores the current character.
     current: char,
-    /// Stores the previous character, if any.
+    /// Stores the previous character.
     previous: char,
     /// Stores the characters that make up a token.
     buffer: String,
