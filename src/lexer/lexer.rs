@@ -159,7 +159,7 @@ impl <'b>Lexer<'b> {
             // if set == 1 { break; }
 
             // There are no possible kinds of token left. This should never happen.
-            else if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
+            if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
 
         }
 
