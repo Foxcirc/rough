@@ -83,10 +83,10 @@ impl <'b>Lexer<'b> {
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
-        println!("Next start");
+        println!("Next start with ",);
 
         // Skip over spaces and tabs, encountered while there's no matching going on.
-        while matches!(self.text.peek().unwrap(), ' ' | '\t') {};
+        while matches!(self.text.next().unwrap(), ' ' | '\t') {};
         
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
