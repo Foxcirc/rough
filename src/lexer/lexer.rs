@@ -121,7 +121,14 @@ impl <'b>Lexer<'b> {
                 
                 //? Check if this is the end of a token. The end is
                 //? considered when there  *would* be no more valid
-                //? Tokens left for the current sequence.   
+                //? Tokens left for the current sequence.
+                //? Example: 14.5 + 6
+                //? 1 - Integer, Float
+                //? 4 - Integer, Float
+                //? . - Float
+                //? parse as float
+                //? +
+                //?
                 
                 // Check if there would be no more possibilities left after self.possible
                 // is updated with the current char. 
