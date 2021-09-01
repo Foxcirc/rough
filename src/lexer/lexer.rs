@@ -132,7 +132,7 @@ impl <'b>Lexer<'b> {
                         self.possible[TokenKind::Float] = false;
                     }
                     
-                    // assert!(self.possible.set() == 1);
+                    assert!(self.possible.set() == 1);
                     break;
             }
             
