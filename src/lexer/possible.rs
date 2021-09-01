@@ -1,7 +1,5 @@
 
-use std::ops::{
-    Index, IndexMut
-};
+use std::ops::{Index, IndexMut};
 use crate::lexer::token::token::*;
 
 // todo update this
