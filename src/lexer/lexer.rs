@@ -132,6 +132,7 @@ impl <'b>Lexer<'b> {
                         self.possible[TokenKind::Float] = false;
                     }
                     
+                    // There should be only one possible token left by now.
                     assert!(self.possible.set() == 1);
                     break;
             }
