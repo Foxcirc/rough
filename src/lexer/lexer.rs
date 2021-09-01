@@ -263,8 +263,7 @@ impl Possible {
 
             else if self[TokenKind::Integer]                   { TokenKind::Integer }
             else if self[TokenKind::Float]                     { TokenKind::Float }
-            else { return TokenKind::Empty };
-            // else { unreachable!() };
+            else { unreachable!() };
     }
 }
 
