@@ -83,6 +83,9 @@ impl <'b>Lexer<'b> {
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
+        // Skip over spaces and tabs, encountered while there's no matching going on.
+        if matches!(self.text.next(), ' ' | '\t') {  continue; };
+        
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
         self.buffer.clear();
