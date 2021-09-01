@@ -103,8 +103,6 @@ impl <'b>Lexer<'b> {
                 None => return None
             };
             
-            println!("{:?}", self.current);
-
             if self.current == '1' { //* for debugging purposes
                 let _x = 1;
             }
