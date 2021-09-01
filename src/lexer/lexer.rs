@@ -120,18 +120,21 @@ impl <'b>Lexer<'b> {
                 
                 // Skip over spaces and tabs, encountered while there's no matching going on.
                 if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
-                
-                //? Check if this is the end of a token. The end is
-                //? considered when there  *would* be no more valid
-                //? Tokens left for the current sequence.
-                //? Example: 14.5 + 6
-                //? 1 - Integer, Float
-                //? 4 - Integer, Float
-                //? . - Float
-                //? parse as float
-                //? +
-                //?
-                
+
+                /*
+                    ? Check if this is the end of a token. The end is
+                    ? considered when there  *would* be no more valid
+                    ? Tokens left for the current sequence.
+                    ?
+                    ? Example: 146+4
+                    ? 1 - Integer, Float
+                    ? 4 - Integer, Float
+                    ? 6 - Integer, Float
+                    ? + - None of the currently valid tokens, may contain this char
+                    ?     So this is the end of the integer Token.
+                    ?     Parse the sequence as Integer.
+                */
+
                 // Check if there would be no more possibilities left after self.possible
                 // is updated with the current char. 
                 if self.possible.peek(self.current, self.previous) == 0 {
