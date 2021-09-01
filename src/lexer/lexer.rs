@@ -104,7 +104,7 @@ impl <'b>Lexer<'b> {
             };
             // println!("{:?}", self.current);
             
-            if self.current == '_' { //* remove
+            if self.current == '1' { //* remove
                 let _x = 1;
             }
             // // Advance the cursor, the line only if the character is a newline.
