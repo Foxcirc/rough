@@ -122,7 +122,7 @@ impl <'b>Lexer<'b> {
                 let set = self.possible.set();
                 
                 // Skip over spaces and tabs, encountered while there's no matching going on.
-                if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
+                // if set == 0 && matches!(self.current, ' ' | '\t') { self.text.next(); continue; };
 
                 // Check if there would be no more possibilities left after self.possible
                 // is updated with the current char. 
