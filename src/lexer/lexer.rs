@@ -127,6 +127,10 @@ impl <'b>Lexer<'b> {
                 // like Integers or Identifiers.
                 if self.possible.peek(self.current, self.previous) == 0 {
                     
+                    // If there are currently no possible tokens, and this char also ins't valid for any,
+                    // the character is invalid. This *should* never happen.
+                    if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
+            
                     // This is an Integer token. Every integer is also a valid float, so clear the float flag.
                     if set == 2 && self.possible[TokenKind::Integer] && self.possible[TokenKind::Float] {
                         self.possible[TokenKind::Float] = false;
@@ -136,7 +140,8 @@ impl <'b>Lexer<'b> {
                     // since this is the end of a token.
                     assert!(self.possible.set() == 1);
                     break;
-            }
+
+                }
             
             // Update self.possible for the current char.
             self.possible.update(self.current, self.previous);
@@ -146,8 +151,6 @@ impl <'b>Lexer<'b> {
             // There is only one possibility for the kind of token left.
             if set == 1 { break; }
 
-            // There are no possible kinds of token left. This should never happen.
-            else if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
 
         }
 
