@@ -68,10 +68,16 @@ impl <'b>Lexer<'b> {
         
         let mut tree = TokenStream::new();
         
-        while let Some(token) = self.next() {
-            tree.push(token);
-        } 
+        // while let Some(token) = self.next() {
+        //     tree.push(token);
+        // } 
         
+        loop {
+            let token = self.next();
+            if token == None { break; };
+            tree.push(token.unwrap());
+        }
+
         return tree
         
     }
