@@ -138,6 +138,7 @@ impl <'b>Lexer<'b> {
             
             // Push the current char onto the buffer, since it is valid for at least
             // one kind of token that is currently being build.
+            self.buffer.push(self.current);
 
             // Update self.possible for the current char.
             self.possible.update(self.current, self.previous);
