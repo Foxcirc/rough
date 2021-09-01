@@ -162,7 +162,7 @@ impl <'b>Lexer<'b> {
 
         self.kind = self.possible.only();
 
-        println!("Current: ", self.current);
+        println!("Current: {:?}", self.current);
 
         return Some(self.build());
 
