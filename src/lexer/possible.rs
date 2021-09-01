@@ -1,3 +1,6 @@
+
+use crate::lexer::token::token::*;
+
 // todo update this
 /// Basically Bitflags, but with the whole "bit" thing removed.
 /// 
