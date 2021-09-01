@@ -102,7 +102,6 @@ impl <'b>Lexer<'b> {
                 Some(v) => v,
                 None => return None
             };
-            println!("{:?}", self.current);
             
             if self.current == '1' { //* remove
                 let _x = 1;
