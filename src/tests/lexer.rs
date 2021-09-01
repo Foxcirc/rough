@@ -31,7 +31,7 @@ fn matching() {
     ".to_owned();
 
     let mut test: String = "
-111             222
+111\n             222
     ".to_owned();
 
     let lexer = Lexer::new(&mut test);
