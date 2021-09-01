@@ -114,7 +114,7 @@ impl <'b>Lexer<'b> {
             
             // println!("{:?}", self.current);
 
-            if self.current == '1' && self.previous == '1' { //* for debugging purposes ... WhAt???
+            if self.current == '\n' { //* for debugging purposes ... WhAt???
                 let _x = 1;
             }
             // // Advance the cursor, the line only if the character is a newline.
