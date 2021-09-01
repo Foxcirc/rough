@@ -1,5 +1,6 @@
 
 use crate::lexer::possible::Possible;
+use crate::lexer::token::token::*;
 
 /// Implemented for Possible.
 /// This trait abstracts the checking if specific combinations of chars
