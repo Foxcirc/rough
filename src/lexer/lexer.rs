@@ -2,7 +2,7 @@
 use std::str::Chars;
 use std::iter::Peekable;
 use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind}};
-use crate::lexer::possible::Possible;
+use crate::lexer::{possible::Possible, check::Check};
 // use super::error::{Error, ErrorKind, /* Step */};
 
 /// The Lexer converts Text to a Stream of Tokens.
