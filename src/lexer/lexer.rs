@@ -89,7 +89,7 @@ impl <'b>Lexer<'b> {
         while matches!(self.text.next().unwrap(), ' ' | '\t') {};
         
         if self.current == ' ' { println!("Whitespace here..."); }
-        
+
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
         self.buffer.clear();
@@ -173,6 +173,10 @@ impl <'b>Lexer<'b> {
     }
     
     fn build(&mut self) -> Token {
+
+        //? The building is done here, so specific cases like
+        //? ignoring underscores for integers can be done.
+
         return match self.kind {
             TokenKind::Empty   => { panic!("Lexer: Empty token not allowed at this point.") },
             TokenKind::Newline   => { self.text.next(); Token::Newline },
