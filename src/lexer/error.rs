@@ -12,6 +12,8 @@ impl Display for Error {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), FormatError> {
         fmt.write_str("Error: ")?;
         Display::fmt(self.kind, fmt)?;
+        // fmt.write_str("\n");
+        Ok(())
     }
 }
 
