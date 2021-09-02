@@ -30,8 +30,8 @@ impl Display for ErrorKind {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), FormatError> {
 
         match self {
-            Self::InvalidSequence { seq: seq, pos: pos } => {
-                fmt.write_str(&format!("Invalid sequence '{}' at {}:{}", chr, pos[0], pos[1]))?;
+            Self::InvalidSequence { kind: kind, seq: seq, pos: pos } => {
+                fmt.write_str(&format!("Invalid sequence \"{}\" for token of kind {} at {}:{}", seq, kind, pos[0], pos[1]))?;
             },
             Self::InvalidChar { chr: chr, pos: pos } => {
                 fmt.write_str(&format!("Invalid character '{}' at {}:{}", chr, pos[0], pos[1]))?;
