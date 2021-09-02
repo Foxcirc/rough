@@ -21,9 +21,9 @@ pub(crate) enum ErrorKind {
     InvalidChar { chr: char, pos: Pos /* [line, colum, char] */ },
 }
 
-/// A single step done by the Lexer. (Eg. Constructing an Integer Token)
-pub(crate) struct Step {
-    token: TokenKind,
-    /// The position where the step was done. [line, column, char]
-    pos: Pos
-}
+// /// A single step done by the Lexer. (Eg. Constructing an Integer Token)
+// pub(crate) struct Step {
+//     token: TokenKind,
+//     /// The position where the step was done. [line, column, char]
+//     pos: Pos
+// }
