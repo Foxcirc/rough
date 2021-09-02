@@ -1,5 +1,5 @@
 
-use crate::lexer::token::token::TokenKind;
+use crate::lexer::{r#const::Pos, token::token::TokenKind};
 use std::collections::VecDeque;
 
 /// The maximum amount of steps to store.
