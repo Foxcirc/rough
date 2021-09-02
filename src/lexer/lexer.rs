@@ -89,18 +89,14 @@ impl <'b>Lexer<'b> {
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
-        if *self.text.peek().unwrap() == ' ' {
-            let _x = 1;
+        //? Skip over spaces and tabs, encountered while there's no matching going on.
+        loop {
+            match self.text.peek() {
+                Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
+                None => return None,
+                _ => break
+            }
         }
-        
-                //? Skip over spaces and tabs, encountered while there's no matching going on.
-                loop {
-                    match self.text.peek() {
-                        Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); },
-                        None => return None,
-                        _ => break
-                    }
-                }
 
         // Clear the old possible tokens. See the 'Clear' trait for more.
         unsafe { self.possible.clear(); }
