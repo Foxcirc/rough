@@ -16,7 +16,7 @@ pub(crate) struct Error {
 
 pub(crate) enum ErrorKind {
     /// Invalid character at a given position
-    InvalidSequence { chr: char, pos: [usize; 3] /* [line, colum, char] */ },
+    InvalidSequence { chr: char, pos: Pos /* [line, colum, char] */ },
     UnfinishedSequence,
 }
 
@@ -24,5 +24,5 @@ pub(crate) enum ErrorKind {
 pub(crate) struct Step {
     token: TokenKind,
     /// The position where the step was done. [line, column, char]
-    pos: [usize; 3]
+    pos: Pos
 }
