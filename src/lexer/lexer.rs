@@ -3,6 +3,7 @@ use std::str::Chars;
 use std::iter::Peekable;
 use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind}};
 use crate::lexer::{possible::Possible, check::Check};
+use crate::lexer::r#const::Pos;
 // use super::error::{Error, ErrorKind, /* Step */};
 
 /// The Lexer converts Text to a Stream of Tokens.
@@ -33,7 +34,7 @@ pub(crate) struct Lexer<'a> {
     /// Represents all Tokens the Sequence could currently be.
     possible: Possible,
     /// The current position in the Text. [line, column, char]
-    cursor: [usize; 3]
+    cursor: Pos
 }
 
 /// The Lexer should not return any Result<>, because a Lexer
