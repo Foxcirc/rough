@@ -38,6 +38,21 @@ pub(crate) enum TokenKind {
     Float,
 }
 
+impl Display for TokenKind {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        
+        fmt.write_str(&match self {
+            Self::Empty => "Empty Token".to_owned(),
+            Self::Newline => "Newline".to_owned(),
+            Self::Symbol(v) => format!("Symbol({})", v),
+            Self::Brace(v) => format!("Brace({})", v),
+            Self::Integer => format!("Integer"),
+            Self::Float => format!("Float"),
+        })?;
+        Ok(())
+    }
+}
+
 /// A symbol like '+', '/', '*=', '&'
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Symbol {
