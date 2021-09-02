@@ -24,5 +24,5 @@ pub(crate) enum ErrorKind {
 pub(crate) struct Step {
     token: TokenKind,
     /// The position where the step was done. [line, column, char]
-    pos: [usize; 2]
+    pos: [usize; 3]
 }
