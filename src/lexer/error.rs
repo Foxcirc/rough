@@ -1,5 +1,5 @@
 
-use crate::lexer::token::token::Token;
+use crate::lexer::token::token::TokenKind;
 use std::collections::VecDeque;
 
 /// The maximum amount of steps to store.
@@ -22,7 +22,7 @@ pub(crate) enum ErrorKind {
 
 /// A single step done by the Lexer. (Eg. Constructing an Integer Token)
 pub(crate) struct Step {
-    token: Token,
+    token: TokenKind,
     /// The position where the step was done. [line, column, char]
     pos: [usize; 2]
 }
