@@ -15,8 +15,10 @@ pub(crate) struct Error {
 }
 
 pub(crate) enum ErrorKind {
-    /// Invalid character at a given position
-    InvalidSequence { chr: char, pos: Pos /* [line, colum, char] */ },
+    /// Invalid sequence while parsing Eg. an integer.
+    InvalidSequence { pos: Pos /* [line, colum, char] */ },
+    /// An invalid character wich doesn't match to any token.
+    InvalidChar { chr: char, pos: Pos /* [line, colum, char] */ },
 }
 
 /// A single step done by the Lexer. (Eg. Constructing an Integer Token)
