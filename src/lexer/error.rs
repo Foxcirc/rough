@@ -1,6 +1,6 @@
 
 use crate::lexer::{constants::Pos, token::token::TokenKind};
-use std::collections::VecDeque;
+// use std::collections::VecDeque;
 
 // /// The maximum amount of steps to store.
 // pub(crate) const MAX_TRACE_LEN: usize = 1024;
