@@ -17,7 +17,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
 
 }
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum ErrorKind {
     /// Invalid sequence while parsing Eg. an integer.
     InvalidSequence { pos: Pos /* [line, colum, char] */ },
