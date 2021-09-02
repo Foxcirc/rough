@@ -103,7 +103,7 @@ impl <'b>Lexer<'b> {
         self.buffer.clear();
         self.kind = TokenKind::Empty;
         self.previous = self.current;
-        self.current = '\0'; //? This is probably reduntant
+        self.current = '\0'; // This is probably reduntant
         self.branch = self.text.clone();
         
         //? Loop until the kind of token could be determined.
