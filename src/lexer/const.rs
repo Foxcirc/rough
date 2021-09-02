@@ -1,2 +1,2 @@
 
-type Pos = [usize; 3];
+pub(crate) type Pos = [usize; 3];
