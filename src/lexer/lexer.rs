@@ -98,8 +98,8 @@ impl <'b>Lexer<'b> {
             }
         }
 
-        // Clear the old possible tokens. See the 'Clear' trait for more.
-        unsafe { self.possible.clear(); }
+        //? Reset some of the state.
+        unsafe { self.possible.clear(); } // See the 'Clear' trait for more.
         self.buffer.clear();
         self.kind = TokenKind::Empty;
         self.previous = self.current;
