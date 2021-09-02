@@ -17,7 +17,6 @@ pub(crate) struct Error {
 pub(crate) enum ErrorKind {
     /// Invalid character at a given position
     InvalidSequence { chr: char, pos: Pos /* [line, colum, char] */ },
-    UnfinishedSequence,
 }
 
 /// A single step done by the Lexer. (Eg. Constructing an Integer Token)
