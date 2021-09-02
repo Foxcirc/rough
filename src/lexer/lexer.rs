@@ -47,9 +47,9 @@ impl <'b>Lexer<'b> {
 
     /// Constructor
     pub(crate) fn new(text: &'b mut String) -> Self {
-        let öäü = 1;
-
+        
         text.push(' ');
+        let☻ = 1;
 
         Self {
             text: text.chars().peekable(),
