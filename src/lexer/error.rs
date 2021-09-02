@@ -37,6 +37,7 @@ impl Display for ErrorKind {
                 fmt.write_str(&format!("Invalid character '{}' at {}:{}", chr, pos[0], pos[1]))?;
             }
         };
+        Ok(())
 
     }
 }
