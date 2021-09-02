@@ -16,7 +16,7 @@ pub(crate) struct Error {
 
 pub(crate) enum ErrorKind {
     /// Invalid character at a given position
-    InvalidSequence { pos: [usize; 3] /* [line, colum, char] */ },
+    InvalidSequence { chr: char, pos: [usize; 3] /* [line, colum, char] */ },
     UnfinishedSequence,
 }
 
