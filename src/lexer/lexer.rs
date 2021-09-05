@@ -198,23 +198,8 @@ impl <'b>Lexer<'b> {
             TokenKind::Brace(v)  => { self.text.next(); Token::Brace(v) },
     
             TokenKind::Integer   => {
-    
-                loop {
-                    self.current = *self.text.peek().expect("Lexer: Iterator drained while building token.");
-                    
-                    // Store chars until the next whitespace.
-                    if !matches!(self.current, '0'..='9' | '_') { break; }
-                    
-                    // Don't push the undercores, since these are invalid for an integer.
-                    if !matches!(self.current, '_') { 
-                        self.buffer.push(self.current);
-                    }
-                    
-                    // Advance the iterator.
-                    self.text.next();
-                }
                 
-                let result = isize::from_str_radix(&self.buffer, 10).expect(&format!("Lexer: Could not build token for sequence '{}', invalid sequence for <Integer>", self.buffer));
+                let result = isize::from_str_radix(self.buffer.chars().filter(|e| e != '_').collect(), 10).expect(&format!("Lexer: Could not build token for sequence '{}', invalid sequence for <Integer>", self.buffer));
                 Token::Integer(result)
             },
             
