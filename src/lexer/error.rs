@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 #[derive(Debug, Clone)]
 pub(crate) struct Error {
     pub(crate) kind: ErrorKind,
-    pub(crate) trace: TrabeBack
+    pub(crate) trace: Traceback
 }
 
 impl Display for Error {
@@ -46,10 +46,12 @@ impl Display for ErrorKind {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct Traceback {
     steps: VecDeque<Log>
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct Log {
     
 }
