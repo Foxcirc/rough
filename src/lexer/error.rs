@@ -46,7 +46,7 @@ impl Display for ErrorKind {
 }
 
 /// A collection of multiple T's wich checks for a max length.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Traceback<T> {
     limit: usize,
     steps: VecDeque<T>
