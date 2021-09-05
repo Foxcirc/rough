@@ -203,7 +203,7 @@ impl <'b>Lexer<'b> {
                     self.current = *self.text.peek().expect("Lexer: Iterator drained while building token.");
                     
                     // Store chars until the next whitespace.
-                    if !matches!(self.current, '0'..='9' | 'a') { break; }
+                    if !matches!(self.current, '0'..='9' | 's') { break; }
                     
                     // Don't push the undercores, since these are invalid for an integer.
                     if !matches!(self.current, '_') { 
