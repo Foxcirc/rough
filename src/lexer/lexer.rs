@@ -203,7 +203,7 @@ impl <'b>Lexer<'b> {
             
             TokenKind::Float   => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect();
-                let result = valid.parse::<f32>().expect(&format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for <Float>", valid, self.buffer));
+                let result = valid.parse().expect(&format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for <Float>", valid, self.buffer));
                 Token::Float(result)
             },
         }
