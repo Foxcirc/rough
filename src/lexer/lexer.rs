@@ -94,7 +94,7 @@ impl <'b>Lexer<'b> {
     /// Generate the next token. Returns an error if the
     /// Token could not be parsed.
     fn next(&mut self) -> Option<Token> {
-         
+
         //* This is probably a somewhat inperformant solution.
         //* ... it is elegant though, at least from my perspective
         
