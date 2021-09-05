@@ -186,9 +186,9 @@ impl <'b>Lexer<'b> {
 
         return match self.kind {
             TokenKind::Empty   => { panic!("Lexer: Empty token not allowed at this point.") },
-            TokenKind::Newline   => { self.text.next(); Token::Newline },
-            TokenKind::Symbol(v) => { self.text.next(); Token::Symbol(v) }, // todo make it TokenKind::Symbol and parse the symbol here #consistency
-            TokenKind::Brace(v)  => { self.text.next(); Token::Brace(v) },
+            TokenKind::Newline   => { self.text.tick(); Token::Newline },
+            TokenKind::Symbol(v) => { self.text.tick(); Token::Symbol(v) }, // todo make it TokenKind::Symbol and parse the symbol here #consistency
+            TokenKind::Brace(v)  => { self.text.tick(); Token::Brace(v) },
     
             TokenKind::Integer   => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect();
