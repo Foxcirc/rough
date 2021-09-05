@@ -5,15 +5,6 @@ use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind}};
 use crate::lexer::{possible::Possible, check::Check};
 use crate::lexer::pos::Pos;
 use crate::lexer::tick::Tick;
-// use super::error::{Error, ErrorKind, Traceback, Log};
-
-// /// Used to en/disable error logging inside the lexer
-// /// for performance reasons.
-// macro_rules! elog {
-//     ($code:expr) => {
-//         if cfg!(lexer_log) { $code } 
-//     };
-// }
 
 /// The Lexer converts Text to a Stream of Tokens.
 /// 
