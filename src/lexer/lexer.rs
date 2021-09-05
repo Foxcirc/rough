@@ -166,7 +166,7 @@ impl <'b>Lexer<'b> {
             self.buffer.push(self.current);
 
             // There is only one possibility for the kind of token left.
-            if self.possible.set() == 1 && self.possible.multichar() { break; }
+            if self.possible.set() == 1 && !self.possible.multichar() { break; }
 
         }
 
