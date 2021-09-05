@@ -101,7 +101,7 @@ impl <'b>Lexer<'b> {
         //? Skip over spaces and tabs, encountered while there's no matching going on.
         loop {
             match self.text.peek() {
-                Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.next().unwrap(); }, // advance self.text
+                Some(chr) if *chr == ' ' || *chr == '\t' => { elog!(()); self.text.next().unwrap(); }, // advance self.text
                 None => return None, // return None if the whole text has been lexed
                 _ => break // stop skipping at the character wich is not a space
             }
