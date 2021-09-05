@@ -6,6 +6,12 @@ use crate::lexer::{possible::Possible, check::Check};
 use crate::lexer::constants::Pos;
 // use super::error::{Error, ErrorKind, /* Step */};
 
+macro_rules! if_log {
+    ($code:expr) => {
+        if cfg!(lexer_log) { $code } 
+    };
+}
+
 /// The Lexer converts Text to a Stream of Tokens.
 /// 
 /// The lexing is done something like this:
