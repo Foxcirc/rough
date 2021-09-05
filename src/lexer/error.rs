@@ -68,7 +68,7 @@ impl <L>Traceback<L> {
 
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Log {
     
 }
