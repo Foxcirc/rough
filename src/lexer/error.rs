@@ -48,7 +48,22 @@ impl Display for ErrorKind {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Traceback {
+    limit: usize,
     steps: VecDeque<Log>
+}
+
+impl Traceback {
+
+    pub(crate) fn push(&mut self, step: Log) {
+        if self.steps.len() > self.limit { self.steps.pop_front().unwrap(); }
+        self.steps.push_back(step);
+    }
+
+    pub(crate) fn limit(&mut self, limit: usize) {
+        if limit <= 0 { panic!("Limit may not be zero.") }
+        self.limit = limit
+    }
+
 }
 
 #[derive(Debug, Clone)]
