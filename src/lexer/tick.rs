@@ -9,17 +9,17 @@ pub(crate) trait Tick {
     fn tick(&mut self, counter: &mut Pos) -> Option<Self::Output>;
 }
 
-impl Tick for Peekable<Chars<'_>> {
+impl Tick for (Peekable<Chars<'_>>, Pos) {
     
     type Output = char;
 
-    fn tick(&mut self, counter: &mut Pos) -> Option<Self::Output> {
-        if let Some(chr) = self.next() {
-            counter.column += 1;
-            counter.all += 1;
+    fn tick(&mut self) -> Option<Self::Output> {
+        if let Some(chr) = self.0.next() {
+            self.1.column += 1;
+            self.1.all += 1;
             if chr == '\n' {
-                counter.column = 0;
-                counter.line += 1
+                self.1.column = 0;
+                self.1.line += 1
             }
             return Some(chr)
         };
