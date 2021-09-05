@@ -57,7 +57,6 @@ impl <'b>Lexer<'b> {
 
         Self {
             text: (text.chars().peekable(), Pos::new()),
-            // branch: text.chars().peekable(),
             current: '\0',
             previous: '\0',
             buffer: String::new(),
