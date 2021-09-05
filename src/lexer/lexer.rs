@@ -20,11 +20,12 @@ use crate::lexer::tick::Tick;
 /// The lexing is done something like this:
 /// 
 /// 0. Call Lexer::next to build the next token
-/// 1. No tokens are possible
-/// 2. Read chars and update the list of possible `TokenKind`s
-/// 3. If there is only one `TokenKind` left. Go back to the start of the sequence.
-/// 4. Read the characters again and parse them as the selected TokenKind.
-/// 5. Repeat until there are no more chars left.
+/// 1. Get the next character.
+/// 2. Update the list of tokens, this char is valid for.
+/// 3. Check if this is the end of a multi-char token.
+/// 4. Do it again.
+/// 
+/// Note: These steps are done in a different order then listed here.
 /// 
 pub(crate) struct Lexer<'a> {
     /// The text to lex.
