@@ -4,4 +4,4 @@ pub(crate) mod token;
 pub(crate) mod possible;
 pub(crate) mod check;
 // pub(crate) mod error;
-pub(crate) mod constants;
+pub(crate) mod types;
