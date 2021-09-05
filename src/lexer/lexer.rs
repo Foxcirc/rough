@@ -42,9 +42,6 @@ pub(crate) struct Lexer<'a> {
     possible: Possible,
 }
 
-/// The Lexer should not return any Result<>, because a Lexer
-/// can't have invalid Input and all internal Errors should be panics.
-
 /// The Lexer::run function will call Lexer::next and
 /// do assertions about the state in the meantime.
 impl <'b>Lexer<'b> {
