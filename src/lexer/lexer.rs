@@ -28,7 +28,7 @@ use crate::lexer::tick::Tick;
 /// 
 pub(crate) struct Lexer<'a> {
     /// The text to lex.
-    text: Peekable<Chars<'a>>,
+    text: (Peekable<Chars<'a>>, Pos),
     /// Stores the current character.
     current: char,
     /// Stores the previous character.
@@ -40,8 +40,6 @@ pub(crate) struct Lexer<'a> {
     /// Used to decide what kind of token to generate.
     /// Represents all Tokens the Sequence could currently be.
     possible: Possible,
-    /// The current position in the Text. [line, column, char]
-    cursor: Pos,
 }
 
 /// The Lexer should not return any Result<>, because a Lexer
@@ -58,14 +56,13 @@ impl <'b>Lexer<'b> {
         text.push(' ');
 
         Self {
-            text: text.chars().peekable(),
+            text: (text.chars().peekable(), Pos::new()),
             // branch: text.chars().peekable(),
             current: '\0',
             previous: '\0',
             buffer: String::new(),
             kind: TokenKind::Empty,
             possible: Possible::default(),
-            cursor: Pos::new(),
         }
     }
     
