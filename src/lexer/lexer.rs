@@ -71,8 +71,6 @@ impl <'b>Lexer<'b> {
             kind: TokenKind::Empty,
             possible: Possible::default(),
             cursor: [0, 0, 0],
-            log: Log::default(),
-            traceback: Traceback::new()
         }
     }
     
