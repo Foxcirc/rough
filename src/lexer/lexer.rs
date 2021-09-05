@@ -43,7 +43,6 @@ pub(crate) struct Lexer<'a> {
     possible: Possible,
     /// The current position in the Text. [line, column, char]
     cursor: Pos,
-
 }
 
 /// The Lexer should not return any Result<>, because a Lexer
