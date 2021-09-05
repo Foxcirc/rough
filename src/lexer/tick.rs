@@ -6,7 +6,7 @@ use crate::lexer::pos::Pos;
 /// Increment the `Pos` and return the next element of self.
 pub(crate) trait Tick {
     type Output;
-    fn tick(&mut self, counter: &mut Pos) -> Option<Self::Output>;
+    fn tick(&mut self) -> Option<Self::Output>;
 }
 
 impl Tick for (Peekable<Chars<'_>>, Pos) {
