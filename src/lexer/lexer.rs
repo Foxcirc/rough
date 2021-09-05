@@ -198,8 +198,8 @@ impl <'b>Lexer<'b> {
             TokenKind::Brace(v)  => { self.text.next(); Token::Brace(v) },
     
             TokenKind::Integer   => {
-                
-                let result = isize::from_str_radix(&self.buffer.chars().filter(|e| *e != '_').collect::<String>(), 10).expect(&format!("Lexer: Could not build token for sequence '{}', invalid sequence for <Integer>", self.buffer));
+                let integer: String = self.buffer.chars().filter(|e| *e != '_').collect();
+                let result = isize::from_str_radix(&integer, 10).expect(&format!("Lexer: Could not build token for sequence '{}', invalid sequence for <Integer>", self.buffer));
                 Token::Integer(result)
             },
             
