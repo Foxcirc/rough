@@ -14,8 +14,11 @@ impl Tick for Peekable<Chars<'_>> {
     
     type Output = char;
 
-    fn tick(&mut self, counter: &mut Pos) {
-        let chr = self.next()?;
+    fn tick(&mut self, counter: &mut Pos) -> Option<Self::Output> {
+        if let Some(chr) = self.next() {
+            if chr == '\n' { counter.line += 1}
+        };
+        None
     }
 
 }
