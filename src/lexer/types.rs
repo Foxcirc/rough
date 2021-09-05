@@ -7,3 +7,9 @@ pub(crate) struct Pos {
     /// All "columns"
     pub(crate) all: usize
 }
+
+impl Pos {
+    pub(crate) fn new() -> Self {
+        Self { column: 0, line: 0, all: 0 }
+    }
+}
