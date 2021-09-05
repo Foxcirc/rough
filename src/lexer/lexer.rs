@@ -98,7 +98,7 @@ impl <'b>Lexer<'b> {
                 _ => break // stop skipping at the character wich is not a space
             }
         }
-
+        
         //? Reset some of the state.
         unsafe { self.possible.clear(); } // See the 'Clear' trait for more.
         self.buffer.clear();
