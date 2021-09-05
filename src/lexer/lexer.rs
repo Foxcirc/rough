@@ -29,8 +29,6 @@ use crate::lexer::tick::Tick;
 pub(crate) struct Lexer<'a> {
     /// The text to lex.
     text: Peekable<Chars<'a>>,
-    // /// A copy of self.text wich is temporarily made inside Lexer::next.
-    // branch: Peekable<Chars<'a>>,
     /// Stores the current character.
     current: char,
     /// Stores the previous character.
