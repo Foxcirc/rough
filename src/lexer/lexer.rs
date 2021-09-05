@@ -167,6 +167,7 @@ impl <'b>Lexer<'b> {
             // Update self.possible for the current char.
             self.possible.update(self.current, self.previous);
                         
+            // Push the current character onto the buffer, so it can be processed later. // todo make it do this only for multi-char tokens like Integer, Float, Ident
             self.buffer.push(self.current);
 
             // There is only one possibility for the kind of token left.
