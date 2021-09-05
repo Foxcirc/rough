@@ -1,7 +1,7 @@
 
 use std::iter::Peekable;
 use std::str::Chars;
-use crate::lexer::types::Pos;
+use crate::lexer::pos::Pos;
 
 /// Increment the `Pos` and return the next element of self.
 pub(crate) trait Tick {
