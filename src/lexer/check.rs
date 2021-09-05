@@ -58,7 +58,7 @@ impl Check for Possible {
         count += (matches!(chr, ')') && set == 0) as usize;
        
         count += (matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer])) as usize;
-        count += (matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || !self[TokenKind::Float] || self[TokenKind::Integer])) as usize;
+        count += (matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer] || self[TokenKind::Float])) as usize;
 
         return count
 
