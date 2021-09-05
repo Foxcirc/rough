@@ -46,15 +46,17 @@ impl Display for ErrorKind {
     }
 }
 
+/// A collection of multiple T's wich checks for a max length.
 #[derive(Debug, Clone)]
-pub(crate) struct Traceback {
+pub(crate) struct Traceback<T> {
     limit: usize,
-    steps: VecDeque<Log>
+    steps: VecDeque<T>
 }
 
-impl Traceback {
+impl <L>Traceback<L> {
 
-    pub(crate) fn push(&mut self, step: Log) {
+    /// Add a L to the traceback and check for the max length.
+    pub(crate) fn push(&mut self, step: L) {
         if self.steps.len() > self.limit { self.steps.pop_front().unwrap(); }
         self.steps.push_back(step);
     }
