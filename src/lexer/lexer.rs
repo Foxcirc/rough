@@ -197,7 +197,7 @@ impl <'b>Lexer<'b> {
     
             TokenKind::Integer   => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect();
-                let result = isize::from_str_radix(&valid, 10).expect(&format!("Lexer: Could not build token for sequence \"{}\", invalid sequence for <Integer>", self.buffer));
+                let result = isize::from_str_radix(&valid, 10).expect(&format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for <Integer>", valid, self.buffer));
                 Token::Integer(result)
             },
             
