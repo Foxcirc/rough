@@ -68,6 +68,8 @@ impl <L>Traceback<L> {
 
 }
 
+/// A "collection" of things a Lexer did inside a single call
+/// to Lexer::next.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Log {
     
