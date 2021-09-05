@@ -121,13 +121,7 @@ impl <'b>Lexer<'b> {
                 Some(v) => *v,
                 None => unreachable!()
             };
-            
-            // println!("{:?}", self.current);
-
-            if self.current == '0' { //* for debugging purposes ... WhAt???
-                let _x = 1;
-            }  
-                
+                            
             let set = self.possible.set();
             
             // Check if this is the end of a multi-char token.
