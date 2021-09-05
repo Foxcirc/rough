@@ -38,7 +38,7 @@ fn matching() {
     // Build the TokenStream
     let stream = lexer.run();
 
-    println!("{:?}", stream);
+    println!("{}", stream);
         
 
     // assert_eq!(
