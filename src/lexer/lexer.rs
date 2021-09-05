@@ -8,7 +8,7 @@ use super::error::{Error, ErrorKind, Traceback, Log};
 
 /// Used to en/disable error logging inside the lexer
 /// for performance reasons.
-macro_rules! if_log {
+macro_rules! elog {
     ($code:expr) => {
         if cfg!(lexer_log) { $code } 
     };
