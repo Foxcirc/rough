@@ -117,8 +117,8 @@ impl <'b>Lexer<'b> {
 
             // Get the next character. This uses peek, since the end of one Token
             // may be the start of another one.
-            self.current = match self.text.tick() {
-                Some(v) => v,
+            self.current = match self.text.peek() {
+                Some(v) => *v,
                 None => unreachable!()
             };
             
@@ -167,6 +167,10 @@ impl <'b>Lexer<'b> {
             
             // Push the current character onto the buffer, so it can be processed later.
             self.buffer.push(self.current);
+
+            // Advance self.text, this is done here, because otherwise several characters
+            // that follow multi-char tokens would be skipped.
+            self.text.tick();
         }
 
         //? Now, that there's only one possible kind of token left, parse the 
