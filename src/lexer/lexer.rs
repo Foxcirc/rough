@@ -6,13 +6,13 @@ use crate::lexer::{possible::Possible, check::Check};
 use crate::lexer::constants::Pos;
 // use super::error::{Error, ErrorKind, /* Step */};
 
-/// Used to en/disable error logging inside the lexer
-/// for performance reasons.
-macro_rules! if_log {
-    ($code:expr) => {
-        if cfg!(lexer_log) { $code } 
-    };
-}
+// /// Used to en/disable error logging inside the lexer
+// /// for performance reasons.
+// macro_rules! if_log {
+//     ($code:expr) => {
+//         if cfg!(lexer_log) { $code } 
+//     };
+// }
 
 /// The Lexer converts Text to a Stream of Tokens.
 /// 
