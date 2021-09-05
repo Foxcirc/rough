@@ -155,7 +155,6 @@ impl <'b>Lexer<'b> {
                 // There should be only one possible token left by now,
                 // since this is the end of a token.
                 assert!(self.possible.set() == 1);
-                println!("Done: {}", &self.buffer);
                 break;
 
             }
