@@ -42,7 +42,11 @@ pub(crate) struct Lexer<'a> {
     /// Represents all Tokens the Sequence could currently be.
     possible: Possible,
     /// The current position in the Text. [line, column, char]
-    cursor: Pos
+    cursor: Pos,
+    /// A Log wich is used to log the decisions made inside Lexer::next.
+    log: Log,
+    /// The traceback wich records the last steps done by the lexer.
+    traceback: Traceback<Log>
 }
 
 /// The Lexer should not return any Result<>, because a Lexer
