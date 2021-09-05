@@ -70,7 +70,8 @@ impl Possible {
 
     /// Check if there is a flag, for a multi-character token (Eg. Ident, Float) set.
     pub(crate) fn multichar(&self) -> bool {
-        self[TokenKind::Integer] || self[TokenKind::Float]
+        // self[TokenKind::Integer] || self[TokenKind::Float]
+        self[TokenKind::Float]
     }
 
 }
