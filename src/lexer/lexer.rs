@@ -117,7 +117,7 @@ impl <'b>Lexer<'b> {
 
             // Get the next character. This uses peek, since the end of one Token
             // may be the start of another one.
-            self.current = match self.text.next() {
+            self.current = match self.text.tick() {
                 Some(v) => v,
                 None => unreachable!()
             };
