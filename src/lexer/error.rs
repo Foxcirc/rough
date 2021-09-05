@@ -19,8 +19,7 @@ impl Display for Error {
     }
 }
 
-impl std::error::Error for Error {
-}
+impl std::error::Error for Error {}
 
 #[derive(Debug, Clone)]
 pub(crate) enum ErrorKind {
@@ -61,6 +60,7 @@ impl <L>Traceback<L> {
         self.steps.push_back(step);
     }
 
+    /// Set the maximum number of steps to store.
     pub(crate) fn limit(&mut self, limit: usize) {
         if limit <= 0 { panic!("Limit may not be zero.") }
         self.limit = limit
