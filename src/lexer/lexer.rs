@@ -126,21 +126,12 @@ impl <'b>Lexer<'b> {
 
             if self.current == '0' { //* for debugging purposes ... WhAt???
                 let _x = 1;
-            }
-            // // Advance the cursor, the line only if the character is a newline.
-            // self.cursor[0] += 1;
-            // self.cursor[2] += 1;
-            // if self.current == '\n' {
-            //     self.cursor[0] = 0;
-            //     self.cursor[1] += 1;
-            // }            
+            }  
                 
             let set = self.possible.set();
             
-            // Check if there would be no more possibilities left after self.possible
-            // is updated with the current char. 
-            // This is only for tokens, wich consist of more then one character,
-            // like Integers or Identifiers.
+            // Check if this is the end of a multi-char token.
+            // The first invalid character is considered the end.
             if self.possible.peek(self.current, self.previous) == 0 {
                 
                 // If there are currently no possible tokens, and this char also ins't valid for any,
