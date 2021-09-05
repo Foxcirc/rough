@@ -16,7 +16,7 @@ impl Check for Possible {
     fn update(&mut self, chr: char, _prev: char) {
 
         /*
-            self[TokenKind::Something] = valid!{ // TODO Make this macro. (or just a function xDD)
+            self[TokenKind::Something] = valid!{ // TODO Make this macro. (or just a function xD)
                 valid('a' | 'b' | 'c'); // what chars are valid
                 previous('1' | '2'); // what previous chars are valid
                 set(TokenKind::Other & TokenKind::What) // what flags have to be already set
