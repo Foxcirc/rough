@@ -3,7 +3,7 @@ use std::str::Chars;
 use std::iter::Peekable;
 use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind}};
 use crate::lexer::{possible::Possible, check::Check};
-use crate::lexer::constants::Pos;
+use crate::lexer::types::Pos;
 // use super::error::{Error, ErrorKind, Traceback, Log};
 
 // /// Used to en/disable error logging inside the lexer
