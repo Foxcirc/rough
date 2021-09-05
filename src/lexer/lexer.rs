@@ -166,11 +166,11 @@ impl <'b>Lexer<'b> {
             
             // Update self.possible for the current char.
             self.possible.update(self.current, self.previous);
-            
-            let set = self.possible.set();
-            
+                        
+            self.buffer.push(self.current);
+
             // There is only one possibility for the kind of token left.
-            if set == 1 { break; }
+            if self.possible.set() == 1 { break; }
 
         }
 
