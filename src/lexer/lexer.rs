@@ -28,8 +28,8 @@ use crate::lexer::constants::Pos;
 pub(crate) struct Lexer<'a> {
     /// The text to lex.
     text: Peekable<Chars<'a>>,
-    /// A copy of self.text wich is temporarily made inside Lexer::next.
-    branch: Peekable<Chars<'a>>,
+    // /// A copy of self.text wich is temporarily made inside Lexer::next.
+    // branch: Peekable<Chars<'a>>,
     /// Stores the current character.
     current: char,
     /// Stores the previous character.
@@ -60,7 +60,7 @@ impl <'b>Lexer<'b> {
 
         Self {
             text: text.chars().peekable(),
-            branch: text.chars().peekable(),
+            // branch: text.chars().peekable(),
             current: '\0',
             previous: '\0',
             buffer: String::new(),
@@ -113,7 +113,7 @@ impl <'b>Lexer<'b> {
         self.kind = TokenKind::Empty;
         self.previous = self.current;
         self.current = '\0'; // This is probably reduntant
-        self.branch = self.text.clone();
+        // self.branch = self.text.clone();
         
         //? Loop until the kind of token could be determined.
         loop {
@@ -122,7 +122,7 @@ impl <'b>Lexer<'b> {
 
             // Get the next character. This uses peek, since the end of one Token
             // may be the start of another one.
-            self.current = match self.branch.next() {
+            self.current = match self.text.next() {
                 Some(v) => v,
                 None => unreachable!()
             };
