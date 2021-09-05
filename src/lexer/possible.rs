@@ -67,6 +67,12 @@ impl Possible {
             else if self[TokenKind::Float]                     { TokenKind::Float }
             else { unreachable!() };
     }
+
+    /// Check if there is a flag, for a multi-character token (Eg. Ident, Float) set.
+    pub(crate) fn multichar(&self) -> bool {
+        self[TokenKind::Integer] || self[TokenKind::Float]
+    }
+
 }
 
 /// Returns the value of the inner array for this TokenKind as reference.
