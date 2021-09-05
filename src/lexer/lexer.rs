@@ -66,7 +66,7 @@ impl <'b>Lexer<'b> {
             buffer: String::new(),
             kind: TokenKind::Empty,
             possible: Possible::default(),
-            cursor: [0, 0, 0],
+            cursor: Pos::new(),
         }
     }
     
