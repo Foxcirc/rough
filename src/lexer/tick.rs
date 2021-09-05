@@ -5,10 +5,12 @@ use crate::lexer::pos::Pos;
 
 /// -> Increment the `Pos` and return the next element of self.
 /// -> Peek the iterator.
+/// -> Get the inner pos.
 pub(crate) trait Tick {
     type Output;
     fn tick(&mut self) -> Option<Self::Output>;
     fn peek(&mut self) -> Option<&Self::Output>;
+    fn pos(&self) -> &Pos;
 }
 
 impl Tick for (Peekable<Chars<'_>>, Pos) {
@@ -30,6 +32,10 @@ impl Tick for (Peekable<Chars<'_>>, Pos) {
 
     fn peek(&mut self) -> Option<&Self::Output> {
         self.0.peek()
+    }
+
+    fn pos(&self) -> &Pos {
+        &self.1
     }
 
 }
