@@ -69,8 +69,6 @@ impl <'b>Lexer<'b> {
 
                 tree.push(token);
                 
-                assert!(self.kind != TokenKind::Empty);
-
             }
             else { return tree };
 
