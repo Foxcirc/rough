@@ -97,7 +97,7 @@ impl <'b>Lexer<'b> {
         
         //? Loop until the kind of token could be determined.
         loop {
-            
+            s
             self.previous = self.current;
 
             // Get the next character. This uses peek, since the end of one Token
