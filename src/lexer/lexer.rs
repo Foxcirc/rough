@@ -65,14 +65,14 @@ impl <'b>Lexer<'b> {
         // } 
         
         loop {
-            if let Some(token) = self.next() {
-
-                tree.push(token);
-                
-            }
-            else { return tree };
-
+            let token = self.next();
+            if token == None { break; };
+            
+            tree.push(token.unwrap());
         }
+
+        return tree
+        
     }
     
     /// Generate the next token. Returns an error if the
