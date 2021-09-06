@@ -65,13 +65,16 @@ impl <'b>Lexer<'b> {
         // } 
         
         loop {
-            let token = self.next();
-            if token == None { break; };
-            tree.push(token.unwrap());
-        }
+            if let Some(token) = self.next() {
 
-        return tree
-        
+                tree.push(token);
+                
+                assert!(self.kind != TokenKind::Empty);
+
+            }
+            else { return tree };
+
+        }
     }
     
     /// Generate the next token. Returns an error if the
