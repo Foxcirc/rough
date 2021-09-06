@@ -55,7 +55,7 @@ impl <'b>Lexer<'b> {
     
     /// Converts the whole Text into a TokenStream and consumes the Lexer.
     /// Inbetween the calls to Lexer::next, some assertions about
-    /// the current state _should_ be done.y
+    /// the current state _should_ be done.
     pub(crate) fn run(mut self) -> TokenStream {
         
         let mut tree = TokenStream::new();
