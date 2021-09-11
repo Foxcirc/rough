@@ -41,9 +41,9 @@ impl Possible {
     pub(crate) fn set(&self) -> usize {
         self.0.iter().filter(|i| **i).count()
     }
-
+s
     /// Returns the kind of Token. Mey only be
-    /// called if only one item is set. Otherwises
+    /// called if only one item is set. Otherwise
     /// is UnDeFiNeD bEhAVioUr, just kidding
     /// there's a check.
     pub(crate) fn only(&self) -> TokenKind {
