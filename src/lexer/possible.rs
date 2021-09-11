@@ -43,7 +43,7 @@ impl Possible {
     }
 
     /// Returns the kind of Token. Mey only be
-    /// called if only one item is set. Otherwise
+    /// called if only one item is set. Otherwises
     /// is UnDeFiNeD bEhAVioUr, just kidding
     /// there's a check.
     pub(crate) fn only(&self) -> TokenKind {
