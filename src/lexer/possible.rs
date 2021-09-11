@@ -80,7 +80,7 @@ impl Index<TokenKind> for Possible {
     type Output = bool;
     fn index(&self, index: TokenKind) -> &Self::Output {
         match index {
-            TokenKind::Empty                   => &self.0[0],
+            TokenKind::Empty                     => &self.0[0],
             TokenKind::Newline                   => &self.0[1],
             TokenKind::Symbol(Symbol::Plus)      => &self.0[2],
             TokenKind::Symbol(Symbol::Minus)     => &self.0[3],
