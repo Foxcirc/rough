@@ -121,10 +121,12 @@ impl <'b>Lexer<'b> {
                 let _x = 1;
             }
             
-            self.peek.update(self.current, self.previous);
+            self.peek.update(self.current, &self.buffer);
             
             // Check if this is the end of a multi-char token.
             // The first invalid character is considered the end.
+            //* Note: This function will also cover any invariants that may occur,
+            //* where a single / multiple characters are valid for more then one token.
             if self.peek.set() == 0 {
                 
                 let set = self.possible.set();
@@ -137,26 +139,45 @@ impl <'b>Lexer<'b> {
                 if set == 2 && self.possible[TokenKind::Integer(IntegerBase::Decimal)] && self.possible[TokenKind::Float] {
                     self.possible[TokenKind::Float] = false;
                 }
+                // This is a single underscore '_'. It is also a valid identifier, so clear the flag.
+                else if set == 2 && self.possible[TokenKind::Identifier] && self.possible[TokenKind::Underscore] {
+                    self.possible[TokenKind::Identifier] = false;
+                }
+
+                // Cover some other invariants.
+
+                // A single '.'
+                if set == 1 && self.possible[TokenKind::Float] && self.buffer.len() == 1 {
+                    unimplemented!("A single dot is currently invalid.")
+                }
                 
                 // There should be only one possible token left by now,
                 // since this is the end of a token.
-                debug_assert!(self.possible.set() == 1);
+                debug_assert!(self.possible.set() == 1, "Invariant occured: buffer({:?}), current({:?}), possible({:?})", self.buffer, self.current, self.possible);                
+
+                // A character is considered a valid terminator,
+                // if it can follow a token of the current TokenKind.
+                // For example an integer can be followed by a whitespace, but not a colon.
+                if !self.possible.terminator(self.current, &self.buffer) {
+                    panic!("The character {:?} is not a valid terminator for a token of kind {} from '{}'", self.current, self.possible.only(), self.buffer)
+                };
+                
                 break;
 
             }
+
+            // Advance self.text, this is done here, because otherwise several characters
+            // that follow multi-char tokens would be skipped.
+            self.text.tick();
             
             // Update self.possible for the current char.
-            self.possible.update(self.current, self.previous);
-                                    
+            self.possible.update(self.current, &self.buffer);
+            
             // There is only one possibility for the kind of token left. Multi character tokens are scanned to the end.
             if self.possible.set() == 1 && !self.possible.multichar() { break; }
             
             // Push the current character onto the buffer, so it can be processed later.
             self.buffer.push(self.current);
-
-            // Advance self.text, this is done here, because otherwise several characters
-            // that follow multi-char tokens would be skipped.
-            self.text.tick();
         }
 
         //? Now, that there's only one possible kind of token left, parse the 
@@ -183,9 +204,9 @@ impl <'b>Lexer<'b> {
 
         return match self.kind {
             TokenKind::Empty   => { panic!("Lexer: Empty token not allowed at this point.") },
-            TokenKind::Newline   => { self.text.tick(); Ok(Token::Newline) },
-            TokenKind::Symbol(v) => { self.text.tick(); Ok(Token::Symbol(v)) },
-            TokenKind::Brace(v)  => { self.text.tick(); Ok(Token::Brace(v)) },
+            TokenKind::Newline   => { Ok(Token::Newline) },
+            TokenKind::Symbol(v) => { Ok(Token::Symbol(v)) },
+            TokenKind::Brace(v)  => { Ok(Token::Brace(v)) },
     
             TokenKind::Integer(IntegerBase::Decimal) => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect(); // yes, this is inefficient
@@ -207,6 +228,12 @@ impl <'b>Lexer<'b> {
                 let result = check!(valid.parse() => self.text.1, self.kind, valid, self.buffer.clone());
                 Ok(Token::Float(result))
             },
+
+            TokenKind::Underscore => { Ok(Token::Underscore) }
+
+            TokenKind::Identifier => { Ok(Token::Identifier(self.buffer.clone())) }
+
+            TokenKind::Keyword(v) => { Ok(Token::Keyword(v)) }
         }
     }
 }
