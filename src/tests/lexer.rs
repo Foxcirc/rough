@@ -3,6 +3,42 @@ use crate::lexer::lexer::Lexer;
 use crate::lexer::token::stream::TokenStream;
 use crate::lexer::token::token::{Token::*, Symbol::*, Brace::*};
 
+const PERFORMANCE_TEXT: &str = "1234 5678 0x1234 0x5678\n\t\n\thello__ world__ 1_2_3 4.5 9.998 1+1+1+1+1+1+1+1*(2-2-2)";
+const PERFORMANCE_PUSH: usize = 10000;
+const PERFORMANCE_THREADS: usize = 8;
+
+#[test]
+// #[ignore]
+fn performance() {
+    
+    let mut threads = Vec::new();
+    
+    let (tx, rx) = std::sync::mpsc::channel::<std::time::Duration>();
+
+    for _ in 0..PERFORMANCE_THREADS {
+        let tx = tx.clone();
+
+        threads.push(std::thread::spawn( move || {
+            let mut test = String::with_capacity(PERFORMANCE_TEXT.len() * PERFORMANCE_THREADS);
+            for _ in 0..PERFORMANCE_PUSH { test.push_str(PERFORMANCE_TEXT); }
+            
+            let start = std::time::Instant::now();
+            let lexer = Lexer::new(&mut test);
+            lexer.run().unwrap();
+            tx.send(std::time::Instant::now() - start).unwrap();
+        }));
+        
+    }
+    
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    let sum: u128 = std::iter::repeat_with(|| rx.recv().unwrap().as_millis()).take(PERFORMANCE_THREADS).sum();
+    println!("Took {}ms on average.", (sum / PERFORMANCE_THREADS as u128)); // last 7850ms
+
+}
+
 #[test]
 fn maths() {
 
