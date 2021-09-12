@@ -27,20 +27,24 @@ impl Check for Possible {
         */
 
         let set = self.set();
-        // todo Put !self[TokenKind::Integer] into the float match, since a float isn't a valid integer.
-        // todo This would make the places matching is done, more consistent.
-        self[TokenKind::Newline]                   = matches!(chr, '\n') && set == 0;
 
-        self[TokenKind::Symbol(Symbol::Plus)]      = matches!(chr, '+') && set == 0;
-        self[TokenKind::Symbol(Symbol::Minus)]     = matches!(chr, '-') && set == 0;
-        self[TokenKind::Symbol(Symbol::Star)]      = matches!(chr, '*') && set == 0;
-        self[TokenKind::Symbol(Symbol::Slash)]     = matches!(chr, '/') && set == 0;
-        self[TokenKind::Symbol(Symbol::Equal)]     = matches!(chr, '=') && set == 0;
-        self[TokenKind::Brace(Brace::NormalOpen)]  = matches!(chr, '(') && set == 0;
-        self[TokenKind::Brace(Brace::NormalClose)] = matches!(chr, ')') && set == 0;
-       
-        self[TokenKind::Integer]                   = matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer]);
-        self[TokenKind::Float]                     = matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer] || self[TokenKind::Float]);
+        self[TokenKind::Newline]                           = matches!(chr, '\n') && set == 0;
+
+        self[TokenKind::Symbol(Symbol::Plus)]              = matches!(chr, '+') && set == 0;
+        self[TokenKind::Symbol(Symbol::Minus)]             = matches!(chr, '-') && set == 0;
+        self[TokenKind::Symbol(Symbol::Star)]              = matches!(chr, '*') && set == 0;
+        self[TokenKind::Symbol(Symbol::Slash)]             = matches!(chr, '/') && set == 0;
+        self[TokenKind::Symbol(Symbol::Equal)]             = matches!(chr, '=') && set == 0;
+        self[TokenKind::Brace(Brace::NormalOpen)]          = matches!(chr, '(') && set == 0;
+        self[TokenKind::Brace(Brace::NormalClose)]         = matches!(chr, ')') && set == 0;
+
+        self[TokenKind::Integer(IntegerBase::Hexadecimal)] = matches!(chr, '0'..='9' | '_' | 'x') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)]);
+        self[TokenKind::Integer(IntegerBase::Binary)]      = matches!(chr, '0'..='9' | '_' | 'b') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)]);
+        
+        self[TokenKind::Float]                             = matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)] || self[TokenKind::Float]);
+
+        // this need to be last, because other tokens depend on it (eg. Integer with Integerbase::Hexadecimal)
+        self[TokenKind::Integer(IntegerBase::Decimal)]     = matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)]);
     }
     fn peek(&self, chr: char, _prev: char) -> usize {
 
@@ -48,7 +52,6 @@ impl Check for Possible {
         let set = self.set();
 
         count += (matches!(chr, '\n') && set == 0) as usize;
-
         count += (matches!(chr, '+') && set == 0) as usize;
         count += (matches!(chr, '-') && set == 0) as usize;
         count += (matches!(chr, '*') && set == 0) as usize;
@@ -56,9 +59,10 @@ impl Check for Possible {
         count += (matches!(chr, '=') && set == 0) as usize;
         count += (matches!(chr, '(') && set == 0) as usize;
         count += (matches!(chr, ')') && set == 0) as usize;
-       
-        count += (matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer])) as usize;
-        count += (matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer] || self[TokenKind::Float])) as usize;
+        count += (matches!(chr, '0'..='9' | '_' | 'x') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)])) as usize;
+        count += (matches!(chr, '0'..='9' | '_' | 'b') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)])) as usize;
+        count += (matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)] || self[TokenKind::Float])) as usize;
+        count += (matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)])) as usize;
 
         return count
 

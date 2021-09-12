@@ -16,11 +16,11 @@ use crate::lexer::token::token::*;
 /// 5  Float
 /// ------------------------------------------------------------
 #[derive(Debug)]
-pub(crate) struct Possible([bool; 11]);
+pub(crate) struct Possible([bool; 13]);
 
 impl Default for Possible {
     fn default() -> Self {
-        Self([false; 11])
+        Self([false; 13])
     }
 }
 
@@ -51,8 +51,8 @@ impl Possible {
         
         return
             
-            if      self[TokenKind::Empty]                   { TokenKind::Empty }
-            else if self[TokenKind::Newline]                   { TokenKind::Newline }
+            if      self[TokenKind::Empty]   { TokenKind::Empty }
+            else if self[TokenKind::Newline] { TokenKind::Newline }
             
             else if self[TokenKind::Symbol(Symbol::Plus)]      { TokenKind::Symbol(Symbol::Plus) }
             else if self[TokenKind::Symbol(Symbol::Minus)]     { TokenKind::Symbol(Symbol::Minus) }
@@ -63,16 +63,22 @@ impl Possible {
             else if self[TokenKind::Brace(Brace::NormalOpen)]  { TokenKind::Brace(Brace::NormalOpen) }
             else if self[TokenKind::Brace(Brace::NormalClose)] { TokenKind::Brace(Brace::NormalClose) }
 
-            else if self[TokenKind::Integer]                   { TokenKind::Integer }
+            else if self[TokenKind::Integer(IntegerBase::Decimal)]     { TokenKind::Integer(IntegerBase::Decimal) }
+            else if self[TokenKind::Integer(IntegerBase::Hexadecimal)] { TokenKind::Integer(IntegerBase::Hexadecimal) }
+            else if self[TokenKind::Integer(IntegerBase::Binary)]      { TokenKind::Integer(IntegerBase::Binary) }
+            
             else if self[TokenKind::Float]                     { TokenKind::Float }
+            
             else { unreachable!() };
     }
 
     /// Check if there is a flag, for a multi-character token (Eg. Ident, Float) set.
     pub(crate) fn multichar(&self) -> bool {
-        self[TokenKind::Integer] || self[TokenKind::Float]
-    }
-
+        self[TokenKind::Integer(IntegerBase::Decimal)] ||
+            self[TokenKind::Integer(IntegerBase::Hexadecimal)] ||
+            self[TokenKind::Integer(IntegerBase::Binary)] ||
+            self[TokenKind::Float]
+        }
 }
 
 /// Returns the value of the inner array for this TokenKind as reference.
@@ -80,17 +86,19 @@ impl Index<TokenKind> for Possible {
     type Output = bool;
     fn index(&self, index: TokenKind) -> &Self::Output {
         match index {
-            TokenKind::Empty                     => &self.0[0],
-            TokenKind::Newline                   => &self.0[1],
-            TokenKind::Symbol(Symbol::Plus)      => &self.0[2],
-            TokenKind::Symbol(Symbol::Minus)     => &self.0[3],
-            TokenKind::Symbol(Symbol::Star)      => &self.0[4],
-            TokenKind::Symbol(Symbol::Slash)     => &self.0[5],
-            TokenKind::Symbol(Symbol::Equal)     => &self.0[6],
-            TokenKind::Brace(Brace::NormalOpen)  => &self.0[7],
-            TokenKind::Brace(Brace::NormalClose) => &self.0[8],
-            TokenKind::Integer                   => &self.0[9],
-            TokenKind::Float                     => &self.0[10],
+            TokenKind::Empty                             => &self.0[0],
+            TokenKind::Newline                           => &self.0[1],
+            TokenKind::Symbol(Symbol::Plus)              => &self.0[2],
+            TokenKind::Symbol(Symbol::Minus)             => &self.0[3],
+            TokenKind::Symbol(Symbol::Star)              => &self.0[4],
+            TokenKind::Symbol(Symbol::Slash)             => &self.0[5],
+            TokenKind::Symbol(Symbol::Equal)             => &self.0[6],
+            TokenKind::Brace(Brace::NormalOpen)          => &self.0[7],
+            TokenKind::Brace(Brace::NormalClose)         => &self.0[8],
+            TokenKind::Integer(IntegerBase::Decimal)     => &self.0[9],
+            TokenKind::Integer(IntegerBase::Hexadecimal) => &self.0[10],
+            TokenKind::Integer(IntegerBase::Binary)      => &self.0[11],
+            TokenKind::Float                             => &self.0[12],
         }
     }
 }
@@ -108,8 +116,10 @@ impl IndexMut<TokenKind> for Possible {
             TokenKind::Symbol(Symbol::Equal) => &mut self.0[6],
             TokenKind::Brace(Brace::NormalOpen)  => &mut self.0[7],
             TokenKind::Brace(Brace::NormalClose)  => &mut self.0[8],
-            TokenKind::Integer   => &mut self.0[9],
-            TokenKind::Float     => &mut self.0[10],
+            TokenKind::Integer(IntegerBase::Decimal)   => &mut self.0[9],
+            TokenKind::Integer(IntegerBase::Hexadecimal)   => &mut self.0[10],
+            TokenKind::Integer(IntegerBase::Binary)   => &mut self.0[11],
+            TokenKind::Float     => &mut self.0[12],
         }
     }
 }

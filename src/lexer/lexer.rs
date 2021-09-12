@@ -1,7 +1,7 @@
 
 use std::str::Chars;
 use std::iter::Peekable;
-use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind}};
+use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind, IntegerBase}};
 use crate::lexer::{possible::Possible, check::Check};
 use crate::lexer::pos::Pos;
 use crate::lexer::tick::Tick;
@@ -107,7 +107,11 @@ impl <'b>Lexer<'b> {
                 Some(v) => *v,
                 None => unreachable!()
             };
-                            
+
+            if self.current == 'x' {
+                let _x = 1;
+            }
+            
             let set = self.possible.set();
             
             // Check if this is the end of a multi-char token.
@@ -119,13 +123,13 @@ impl <'b>Lexer<'b> {
                 if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
         
                 // This is an Integer token. Every integer is also a valid float, so clear the float flag.
-                if set == 2 && self.possible[TokenKind::Integer] && self.possible[TokenKind::Float] {
+                if set == 2 && self.possible[TokenKind::Integer(IntegerBase::Decimal)] && self.possible[TokenKind::Float] {
                     self.possible[TokenKind::Float] = false;
                 }
                 
                 // There should be only one possible token left by now,
                 // since this is the end of a token.
-                assert!(self.possible.set() == 1);
+                debug_assert!(self.possible.set() == 1);
                 break;
 
             }
@@ -133,7 +137,7 @@ impl <'b>Lexer<'b> {
             // Update self.possible for the current char.
             self.possible.update(self.current, self.previous);
                                     
-            // There is only one possibility for the kind of token left.
+            // There is only one possibility for the kind of token left. Multi character tokens are scanned to the end.
             if self.possible.set() == 1 && !self.possible.multichar() { break; }
             
             // Push the current character onto the buffer, so it can be processed later.
@@ -155,24 +159,39 @@ impl <'b>Lexer<'b> {
     
     fn build(&mut self) -> Token {
 
-        //? The building is done here, so specific cases like
-        //? ignoring underscores for integers can be done.
+        //? Parsing the sequence as eg. an integer is done here.
+
+        macro_rules! parse_error {
+            ($valid:ident, $buffer:expr => $msg:expr) => {
+                &format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for {}", $valid, $buffer, $msg)
+            };
+        }
 
         return match self.kind {
             TokenKind::Empty   => { panic!("Lexer: Empty token not allowed at this point.") },
             TokenKind::Newline   => { self.text.tick(); Token::Newline },
-            TokenKind::Symbol(v) => { self.text.tick(); Token::Symbol(v) }, // todo make it TokenKind::Symbol and parse the symbol here #consistency
+            TokenKind::Symbol(v) => { self.text.tick(); Token::Symbol(v) },
             TokenKind::Brace(v)  => { self.text.tick(); Token::Brace(v) },
     
-            TokenKind::Integer   => {
-                let valid: String = self.buffer.chars().filter(|e| *e != '_').collect();
-                let result = isize::from_str_radix(&valid, 10).expect(&format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for <Integer>", valid, self.buffer));
+            TokenKind::Integer(IntegerBase::Decimal) => {
+                let valid: String = self.buffer.chars().filter(|e| *e != '_').collect(); // yes, this is inefficient
+                let result = isize::from_str_radix(&valid, 10).expect(parse_error!(valid, self.buffer => "Integer with base 10"));
+                Token::Integer(result)
+            },
+            TokenKind::Integer(IntegerBase::Hexadecimal) => {
+                let valid: String = self.buffer.chars().filter(|e| !(*e == '_' || *e == 'x')).collect();
+                let result = isize::from_str_radix(&valid, 10).expect(parse_error!(valid, self.buffer => "Integer with base 16"));
+                Token::Integer(result)
+            },
+            TokenKind::Integer(IntegerBase::Binary) => {
+                let valid: String = self.buffer.chars().filter(|e| !(*e == '_' || *e == 'b')).collect();
+                let result = isize::from_str_radix(&valid, 10).expect(parse_error!(valid, self.buffer => "Integer with base 2"));
                 Token::Integer(result)
             },
             
             TokenKind::Float   => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect();
-                let result = valid.parse().expect(&format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for <Float>", valid, self.buffer));
+                let result = valid.parse().expect(parse_error!(valid, self.buffer => "Float"));
                 Token::Float(result)
             },
         }

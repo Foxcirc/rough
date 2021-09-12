@@ -34,7 +34,7 @@ pub(crate) enum TokenKind {
     Newline,
     Symbol(Symbol),
     Brace(Brace),
-    Integer,
+    Integer(IntegerBase),
     Float,
 }
 
@@ -46,11 +46,18 @@ impl Display for TokenKind {
             Self::Newline => "Newline".to_owned(),
             Self::Symbol(v) => format!("Symbol({})", v),
             Self::Brace(v) => format!("Brace({})", v),
-            Self::Integer => format!("Integer"),
+            Self::Integer(_) => format!("Integer"),
             Self::Float => format!("Float"),
         })?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum IntegerBase {
+    Decimal,
+    Hexadecimal,
+    Binary
 }
 
 /// A symbol like '+', '/', '*=', '&'
