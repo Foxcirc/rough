@@ -33,6 +33,9 @@ pub(crate) struct Lexer<'a> {
     /// Used to decide what kind of token to generate.
     /// Represents all Tokens the Sequence could currently be.
     possible: Possible,
+    /// Used peek how many possible kinds of token would be left
+    /// after a call to `self.possible.update`.
+    peek: Possible,
 }
 
 /// The Lexer::run function will call Lexer::next and
@@ -51,6 +54,7 @@ impl <'b>Lexer<'b> {
             buffer: String::new(),
             kind: TokenKind::Empty,
             possible: Possible::default(),
+            peek: Possible::default(),
         }
     }
     
@@ -94,6 +98,7 @@ impl <'b>Lexer<'b> {
         
         //? Reset some of the state.
         unsafe { self.possible.clear(); } // See the 'Clear' trait for more.
+        unsafe { self.peek.clear(); } // See the 'Clear' trait for more.
         self.buffer.clear();
         self.kind = TokenKind::Empty;
         self.previous = self.current;
@@ -116,11 +121,13 @@ impl <'b>Lexer<'b> {
                 let _x = 1;
             }
             
-            let set = self.possible.set();
+            self.peek.update(self.current, self.previous);
             
             // Check if this is the end of a multi-char token.
             // The first invalid character is considered the end.
-            if self.possible.peek(self.current, self.previous) == 0 {
+            if self.peek.set() == 0 {
+                
+                let set = self.possible.set();
                 
                 // If there are currently no possible tokens, and this char also ins't valid for any,
                 // the character is invalid. This *should* never happen.

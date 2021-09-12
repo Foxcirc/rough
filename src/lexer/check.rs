@@ -8,8 +8,6 @@ use crate::lexer::token::token::*;
 pub(crate) trait Check {
     /// Update the flags according to chr.
     fn update(&mut self, chr: char, prev: char);
-    /// Peek how many flags would be valid after a call to Char::update(chr).
-    fn peek(&self, chr: char, prev: char) -> usize;
 }
 
 impl Check for Possible {
@@ -46,7 +44,8 @@ impl Check for Possible {
         // this need to be last, because other tokens depend on it (eg. Integer with Integerbase::Hexadecimal)
         self[TokenKind::Integer(IntegerBase::Decimal)]     = matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)]);
     }
-    fn peek(&self, chr: char, _prev: char) -> usize {
+
+/*     fn peek(&self, chr: char, _prev: char) -> usize {
 
         let mut count = 0;
         let set = self.set();
@@ -69,5 +68,6 @@ impl Check for Possible {
 
         return count
 
-    }
+    } */
+
 }
