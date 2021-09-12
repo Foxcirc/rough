@@ -28,7 +28,7 @@ impl Display for Token {
 }
 
 /// Represents a kind of Token.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TokenKind {
     Empty,
     Newline,
@@ -42,26 +42,36 @@ impl Display for TokenKind {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         
         fmt.write_str(&match self {
-            Self::Empty => "Empty Token".to_owned(),
-            Self::Newline => "Newline".to_owned(),
+            Self::Empty => format!("Empty Token"),
+            Self::Newline => format!("Newline"),
             Self::Symbol(v) => format!("Symbol({})", v),
             Self::Brace(v) => format!("Brace({})", v),
-            Self::Integer(_) => format!("Integer"),
+            Self::Integer(v) => format!("Integer({})", v),
             Self::Float => format!("Float"),
         })?;
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum IntegerBase {
     Decimal,
     Hexadecimal,
     Binary
 }
 
+impl Display for IntegerBase {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        fmt.write_str(match self {
+            IntegerBase::Decimal => "Base(10)",
+            IntegerBase::Hexadecimal => "Base(16)",
+            IntegerBase::Binary => "Base(2)",
+        })
+    }
+}
+
 /// A symbol like '+', '/', '*=', '&'
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum Symbol {
     Plus, // "+"
     Minus, // "-
@@ -83,7 +93,7 @@ impl Display for Symbol {
 }
 
 /// A brace / paranthese like '(', '}', '[' ('<' is a Symbol) 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq,  PartialEq)]
 pub(crate) enum Brace {
     NormalOpen, // "("
     NormalClose // ")"

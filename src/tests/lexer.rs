@@ -32,7 +32,7 @@ fn maths() {
 
     let lexer = Lexer::new(&mut test);
     // Build the TokenStream
-    let stream = lexer.run();
+    let stream = lexer.run().display_error();
     
     assert!(
         stream ==
@@ -53,7 +53,7 @@ fn feature() {
 
     let lexer = Lexer::new(&mut test);
     // Build the TokenStream
-    let stream = lexer.run();
+    let stream = lexer.run().display_error();
 
     assert!(
         stream ==
@@ -64,19 +64,39 @@ fn feature() {
 
 #[test]
 #[should_panic]
-// #[ignore]
+#[ignore]
 fn invalid() {
     
     let mut test: String = "
     
-        0b2
+        0b1021
         
     ".to_owned();
 
     let lexer = Lexer::new(&mut test);
     // Build the TokenStream
-    let stream = lexer.run();
+    let stream = lexer.run().display_error();
 
     println!("{}", stream);
+
+}
+
+trait DisplayError<T> {
+    fn display_error(self) -> T;
+}
+
+impl<T, E: std::fmt::Display> DisplayError<T> for Result<T, E> {
+
+    fn display_error(self) -> T {
+
+        match self {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("{}", e);
+                panic!("^^ see above ^^");
+            }
+        }
+
+    }
 
 }

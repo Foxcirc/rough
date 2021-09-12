@@ -5,6 +5,7 @@ use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind, Integer
 use crate::lexer::{possible::Possible, check::Check};
 use crate::lexer::pos::Pos;
 use crate::lexer::tick::Tick;
+use crate::lexer::error::{LexError, LexResult};
 
 /// The Lexer converts Text to a Stream of Tokens.
 /// 
@@ -56,7 +57,7 @@ impl <'b>Lexer<'b> {
     /// Converts the whole Text into a TokenStream and consumes the Lexer.
     /// Inbetween the calls to Lexer::next, some assertions about
     /// the current state _should_ be done.
-    pub(crate) fn run(mut self) -> TokenStream {
+    pub(crate) fn run(mut self) -> LexResult<TokenStream> {
         
         let mut tree = TokenStream::new();
         
@@ -65,25 +66,28 @@ impl <'b>Lexer<'b> {
         // } 
         
         loop {
-            let token = self.next();
-            if token == None { break; };
+            let token = match self.next() {
+                Ok(v) => v,
+                Err(LexError::EndOfInput) => break,
+                Err(e) => return Err(e),
+            };
 
-            tree.push(token.unwrap());
+            tree.push(token);
         }
 
-        return tree
+        return Ok(tree)
         
     }
     
     /// Generate the next token. Returns an error if the
     /// Token could not be parsed.
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> LexResult<Token> {
         
         //? Skip over spaces and tabs, encountered while there's no matching going on.
         loop {
             match self.text.peek() {
                 Some(chr) if *chr == ' ' || *chr == '\t' => { self.text.tick().unwrap(); }, // advance self.text
-                None => return None, // return None if the whole text has been lexed
+                None => return Err(LexError::EndOfInput), // return None if the whole text has been lexed
                 _ => break // stop skipping at the character wich is not a space
             }
         }
@@ -153,46 +157,48 @@ impl <'b>Lexer<'b> {
 
         self.kind = self.possible.only();
 
-        return Some(self.build());
+        return self.build();
 
     }
     
-    fn build(&mut self) -> Token {
+    fn build(&mut self) -> LexResult<Token> {
 
         //? Parsing the sequence as eg. an integer is done here.
 
-        macro_rules! parse_error {
-            ($valid:ident, $buffer:expr => $msg:expr) => {
-                &format!("Lexer: Could not build token for sequence \"{}\" wich was was built from \"{}\", invalid sequence for {}", $valid, $buffer, $msg)
+        macro_rules! check {
+            ($eval:expr => $pos:expr, $target:expr, $seq:expr, $orig:expr) => {
+                match $eval {
+                    Ok(v) => v,
+                    Err(_) => { return Err(LexError::InvalidSequence { pos: $pos, target: $target, seq: $seq, orig: $orig } ) }
+                }
             };
         }
 
         return match self.kind {
             TokenKind::Empty   => { panic!("Lexer: Empty token not allowed at this point.") },
-            TokenKind::Newline   => { self.text.tick(); Token::Newline },
-            TokenKind::Symbol(v) => { self.text.tick(); Token::Symbol(v) },
-            TokenKind::Brace(v)  => { self.text.tick(); Token::Brace(v) },
+            TokenKind::Newline   => { self.text.tick(); Ok(Token::Newline) },
+            TokenKind::Symbol(v) => { self.text.tick(); Ok(Token::Symbol(v)) },
+            TokenKind::Brace(v)  => { self.text.tick(); Ok(Token::Brace(v)) },
     
             TokenKind::Integer(IntegerBase::Decimal) => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect(); // yes, this is inefficient
-                let result = isize::from_str_radix(&valid, 10).expect(parse_error!(valid, self.buffer => "Integer with base 10"));
-                Token::Integer(result)
+                let result = check!(isize::from_str_radix(&valid, 10) => self.text.1, self.kind, valid, self.buffer.clone());
+                Ok(Token::Integer(result))
             },
             TokenKind::Integer(IntegerBase::Hexadecimal) => {
                 let valid: String = self.buffer.chars().filter(|e| !(*e == '_' || *e == 'x')).collect();
-                let result = isize::from_str_radix(&valid, 10).expect(parse_error!(valid, self.buffer => "Integer with base 16"));
-                Token::Integer(result)
+                let result = check!(isize::from_str_radix(&valid, 16) => self.text.1, self.kind, valid, self.buffer.clone());
+                Ok(Token::Integer(result))
             },
             TokenKind::Integer(IntegerBase::Binary) => {
                 let valid: String = self.buffer.chars().filter(|e| !(*e == '_' || *e == 'b')).collect();
-                let result = isize::from_str_radix(&valid, 10).expect(parse_error!(valid, self.buffer => "Integer with base 2"));
-                Token::Integer(result)
+                let result = check!(isize::from_str_radix(&valid, 2) => self.text.1, self.kind, valid, self.buffer.clone());
+                Ok(Token::Integer(result))
             },
-            
             TokenKind::Float   => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect();
-                let result = valid.parse().expect(parse_error!(valid, self.buffer => "Float"));
-                Token::Float(result)
+                let result = check!(valid.parse() => self.text.1, self.kind, valid, self.buffer.clone());
+                Ok(Token::Float(result))
             },
         }
     }
