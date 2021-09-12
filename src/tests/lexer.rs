@@ -63,13 +63,13 @@ fn feature() {
 }
 
 #[test]
-#[should_panic]
+// #[should_panic]
 #[ignore]
 fn invalid() {
     
     let mut test: String = "
     
-        0b1021
+        0xF0A01
         
     ".to_owned();
 

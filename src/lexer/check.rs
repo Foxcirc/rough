@@ -38,8 +38,8 @@ impl Check for Possible {
         self[TokenKind::Brace(Brace::NormalOpen)]          = matches!(chr, '(') && set == 0;
         self[TokenKind::Brace(Brace::NormalClose)]         = matches!(chr, ')') && set == 0;
 
-        self[TokenKind::Integer(IntegerBase::Hexadecimal)] = matches!(chr, '0'..='9' | '_' | 'x') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)]);
-        self[TokenKind::Integer(IntegerBase::Binary)]      = matches!(chr, '0'..='9' | '_' | 'b') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)]);
+        self[TokenKind::Integer(IntegerBase::Hexadecimal)] = matches!(chr, '0'..='9' | 'a'..='f' | 'A'..='F' | 'x' | '_') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)]);
+        self[TokenKind::Integer(IntegerBase::Binary)]      = matches!(chr, '0' | '1' | '_' | 'b') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)]);
         
         self[TokenKind::Float]                             = matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)] || self[TokenKind::Float]);
 
@@ -59,9 +59,12 @@ impl Check for Possible {
         count += (matches!(chr, '=') && set == 0) as usize;
         count += (matches!(chr, '(') && set == 0) as usize;
         count += (matches!(chr, ')') && set == 0) as usize;
-        count += (matches!(chr, '0'..='9' | '_' | 'x') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)])) as usize;
-        count += (matches!(chr, '0'..='9' | '_' | 'b') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)])) as usize;
+
+        count += (matches!(chr, '0'..='9' | 'a'..='f' | 'A'..='F' | 'x' | '_') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)])) as usize;
+        count += (matches!(chr, '0' | '1' | '_' | 'b') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)])) as usize;
+    
         count += (matches!(chr, '0'..='9' | '_' | '.') && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)] || self[TokenKind::Float])) as usize;
+       
         count += (matches!(chr, '0'..='9' | '_')       && (set == 0 || self[TokenKind::Integer(IntegerBase::Decimal)])) as usize;
 
         return count

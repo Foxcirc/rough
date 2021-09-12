@@ -112,7 +112,7 @@ impl <'b>Lexer<'b> {
                 None => unreachable!()
             };
 
-            if self.current == 'x' {
+            if self.current == 'A' {
                 let _x = 1;
             }
             
