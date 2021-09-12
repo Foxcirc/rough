@@ -5,3 +5,4 @@ authors = ["foxcirc <whyfoxcirc@gmx.de>"]
 edition = "2018"
 
 [dependencies]
+enumflags2 = "*"

@@ -1,8 +1,8 @@
 
 use std::str::Chars;
 use std::iter::Peekable;
-use crate::lexer::token::{stream::TokenStream, token::{Token, TokenKind, IntegerBase}};
-use crate::lexer::{possible::Possible, check::Check};
+use crate::lexer::token::{stream::TokenStream, token::*};
+use crate::lexer::{possible::{Possible, Functions}, check::Check};
 use crate::lexer::pos::Pos;
 use crate::lexer::tick::Tick;
 use crate::lexer::error::{LexError, LexResult};
@@ -136,18 +136,18 @@ impl <'b>Lexer<'b> {
                 if set == 0 { panic!("Lexer: Invalid sequence at '{}', could not match to Token.", self.current) }
         
                 // This is an Integer token. Every integer is also a valid float, so clear the float flag.
-                if set == 2 && self.possible[TokenKind::Integer(IntegerBase::Decimal)] && self.possible[TokenKind::Float] {
-                    self.possible[TokenKind::Float] = false;
+                if set == 2 && self.possible.has(TokenKind::IntegerDecimal) && self.possible.has(TokenKind::Float) {
+                    self.possible.remove(TokenKind::Float);
                 }
                 // This is a single underscore '_'. It is also a valid identifier, so clear the flag.
-                else if set == 2 && self.possible[TokenKind::Identifier] && self.possible[TokenKind::Underscore] {
-                    self.possible[TokenKind::Identifier] = false;
+                else if set == 2 && self.possible.has(TokenKind::Identifier) && self.possible.has(TokenKind::Underscore) {
+                    self.possible.remove(TokenKind::Identifier);
                 }
 
                 // Cover some other invariants.
 
                 // A single '.'
-                if set == 1 && self.possible[TokenKind::Float] && self.buffer.len() == 1 {
+                if set == 1 && self.possible.has(TokenKind::Float) && self.buffer.len() == 1 {
                     unimplemented!("A single dot is currently invalid.")
                 }
                 
@@ -205,20 +205,27 @@ impl <'b>Lexer<'b> {
         return match self.kind {
             TokenKind::Empty   => { panic!("Lexer: Empty token not allowed at this point.") },
             TokenKind::Newline   => { Ok(Token::Newline) },
-            TokenKind::Symbol(v) => { Ok(Token::Symbol(v)) },
-            TokenKind::Brace(v)  => { Ok(Token::Brace(v)) },
+            
+            TokenKind::SymbolPlus  => { Ok(Token::Symbol(Symbol::Plus)) },
+            TokenKind::SymbolMinus => { Ok(Token::Symbol(Symbol::Minus)) },
+            TokenKind::SymbolStar  => { Ok(Token::Symbol(Symbol::Star)) },
+            TokenKind::SymbolSlash => { Ok(Token::Symbol(Symbol::Slash)) },
+            TokenKind::SymbolEqual => { Ok(Token::Symbol(Symbol::Equal)) },
+
+            TokenKind::BraceNormalOpen  => { Ok(Token::Brace(Brace::NormalOpen)) },
+            TokenKind::BraceNormalClose => { Ok(Token::Brace(Brace::NormalClose)) },
     
-            TokenKind::Integer(IntegerBase::Decimal) => {
+            TokenKind::IntegerDecimal => {
                 let valid: String = self.buffer.chars().filter(|e| *e != '_').collect(); // yes, this is inefficient
                 let result = check!(isize::from_str_radix(&valid, 10) => self.text.1, self.kind, valid, self.buffer.clone());
                 Ok(Token::Integer(result))
             },
-            TokenKind::Integer(IntegerBase::Hexadecimal) => {
+            TokenKind::IntegerHexadecimal => {
                 let valid: String = self.buffer.chars().filter(|e| !(*e == '_' || *e == 'x')).collect();
                 let result = check!(isize::from_str_radix(&valid, 16) => self.text.1, self.kind, valid, self.buffer.clone());
                 Ok(Token::Integer(result))
             },
-            TokenKind::Integer(IntegerBase::Binary) => {
+            TokenKind::IntegerBinary => {
                 let valid: String = self.buffer.chars().filter(|e| !(*e == '_' || *e == 'b')).collect();
                 let result = check!(isize::from_str_radix(&valid, 2) => self.text.1, self.kind, valid, self.buffer.clone());
                 Ok(Token::Integer(result))
@@ -233,7 +240,7 @@ impl <'b>Lexer<'b> {
 
             TokenKind::Identifier => { Ok(Token::Identifier(self.buffer.clone())) }
 
-            TokenKind::Keyword(v) => { Ok(Token::Keyword(v)) }
+            TokenKind::KeywordPackage => { Ok(Token::Keyword(Keyword::Package)) }
         }
     }
 }

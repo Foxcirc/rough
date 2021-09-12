@@ -1,14 +1,12 @@
 
 build:
-	cargo run
+	cargo +nightly run
 
 run:
-	cargo run
+	cargo +nightly run
 
 test:
 	cls
-	cargo test -- --nocapture
+	cargo +nightly test -- --nocapture
 
-commit:
-	git add *
-	git commit -m ...
+install: build

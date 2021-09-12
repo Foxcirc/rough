@@ -1,4 +1,5 @@
 
+use enumflags2::{bitflags};
 use std::fmt::{Display, Formatter};
 
 /// Represents a single syntax-token.
@@ -34,17 +35,34 @@ impl Display for Token {
 }
 
 /// Represents a kind of Token.
+#[bitflags]
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TokenKind {
-    Empty,
-    Newline,
-    Symbol(Symbol),
-    Brace(Brace),
-    Integer(IntegerBase),
-    Float,
-    Underscore, // a single underscore
-    Identifier,
-    Keyword(Keyword)
+    Empty = 1 << 0,
+    Newline = 1 << 1,
+    
+    // Symbols
+    SymbolPlus = 1 << 2,
+    SymbolMinus = 1 << 3,
+    SymbolStar = 1 << 4,
+    SymbolSlash = 1 << 5,
+    SymbolEqual = 1 << 6,
+
+    // Braces
+    BraceNormalOpen = 1 << 7,
+    BraceNormalClose = 1 << 8,
+
+    // Integers & Floats
+    IntegerDecimal = 1 << 9,
+    IntegerHexadecimal = 1 << 10,
+    IntegerBinary = 1 << 11,
+    Float = 1 << 12,
+
+    Underscore = 1 << 13,
+    Identifier = 1 << 14,
+
+    KeywordPackage = 1 << 15
 }
 
 impl Display for TokenKind {
@@ -53,13 +71,10 @@ impl Display for TokenKind {
         fmt.write_str(&match self {
             Self::Empty => format!("Empty Token"),
             Self::Newline => format!("Newline"),
-            Self::Symbol(v) => format!("Symbol({})", v),
-            Self::Brace(v) => format!("Brace({})", v),
-            Self::Integer(v) => format!("Integer({})", v),
             Self::Float => format!("Float"),
             Self::Underscore => format!("Underscore"),
             Self::Identifier => format!("Identifier"),
-            Self::Keyword(v) => format!("Keyword({})", v),
+            _ => format!("Other") // todo add all variants
         })?;
         Ok(())
     }

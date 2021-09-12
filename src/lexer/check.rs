@@ -4,7 +4,7 @@
 //! `lexer.rs` (around line 130) during the token sysnthesis, where
 //! some invariants that can occur here are matched.
 
-use crate::lexer::possible::Possible;
+use crate::lexer::possible::{Possible, Functions};
 use crate::lexer::token::token::*;
 
 /// Implemented for Possible.
@@ -20,43 +20,32 @@ pub(crate) trait Check {
 impl Check for Possible {
     fn update(&mut self, chr: char, _buffer: &String) {
 
-        /*
-            self[TokenKind::Something] = valid!{ // TODO Make this macro. (or just a function xD)
-                valid('a' | 'b' | 'c'); // what chars are valid
-                previous('1' | '2'); // what previous chars are valid
-                set(TokenKind::Other & TokenKind::What) // what flags have to be already set
-            }
-
-            or, also
-            self[TokenKind::Keyword(Keyword::While)] = keyword!("while")
-        */
-
         // "This is the start of a new token"
         let start = self.set() == 0;
 
-        self[TokenKind::Newline]                           = matches!(chr, '\n') && start;
+        self.update_flag(matches!(chr, '\n') && start, TokenKind::Newline);
 
         // self[TokenKind::Keyword(Keyword::Package)]
 
-        self[TokenKind::Symbol(Symbol::Plus)]              = chr == '+' && start;
-        self[TokenKind::Symbol(Symbol::Minus)]             = chr == '-' && start;
-        self[TokenKind::Symbol(Symbol::Star)]              = chr == '*' && start;
-        self[TokenKind::Symbol(Symbol::Slash)]             = chr == '/' && start;
-        self[TokenKind::Symbol(Symbol::Equal)]             = chr == '=' && start;
-        self[TokenKind::Brace(Brace::NormalOpen)]          = chr == '(' && start;
-        self[TokenKind::Brace(Brace::NormalClose)]         = chr == ')' && start;
+        self.update_flag(chr == '+' && start, TokenKind::SymbolPlus);
+        self.update_flag(chr == '-' && start, TokenKind::SymbolMinus);
+        self.update_flag(chr == '*' && start, TokenKind::SymbolStar);
+        self.update_flag(chr == '/' && start, TokenKind::SymbolSlash);
+        self.update_flag(chr == '=' && start, TokenKind::SymbolEqual);
+        self.update_flag(chr == '(' && start, TokenKind::BraceNormalOpen);
+        self.update_flag(chr == ')' && start, TokenKind::BraceNormalClose);
 
-        self[TokenKind::Integer(IntegerBase::Hexadecimal)] = matches!(chr, '0'..='9' | 'a'..='f' | 'A'..='F' | 'x' | '_') && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'x' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Hexadecimal)]);
-        self[TokenKind::Integer(IntegerBase::Binary)]      = matches!(chr, '0' | '1' | '_' | 'b')                         && ((self[TokenKind::Integer(IntegerBase::Decimal)] && chr == 'b' /* && prev == '0' */) || self[TokenKind::Integer(IntegerBase::Binary)]);
+        self.update_flag(matches!(chr, '0'..='9' | 'a'..='f' | 'A'..='F' | 'x' | '_') && ((self.has(TokenKind::IntegerDecimal) && chr == 'x' /* && prev == '0' */) || self.has(TokenKind::IntegerHexadecimal)), TokenKind::IntegerHexadecimal);
+        self.update_flag(matches!(chr, '0' | '1' | '_' | 'b')                         && ((self.has(TokenKind::IntegerDecimal) && chr == 'b' /* && prev == '0' */) || self.has(TokenKind::IntegerBinary)), TokenKind::IntegerBinary);
         
-        self[TokenKind::Float]                             = matches!(chr, '0'..='9' | '_' | '.') && ((start && chr != '_') || self[TokenKind::Integer(IntegerBase::Decimal)] || self[TokenKind::Float]);
+        self.update_flag(matches!(chr, '0'..='9' | '_' | '.') && ((start && chr != '_') || self.has(TokenKind::IntegerDecimal) || self.has(TokenKind::Float)), TokenKind::Float);
 
         // this needs to be last, because other tokens depend on it (eg. Integer with Integerbase::Hexadecimal)
-        self[TokenKind::Integer(IntegerBase::Decimal)]     = matches!(chr, '0'..='9' | '_')       && ((start && chr != '_') || self[TokenKind::Integer(IntegerBase::Decimal)]);
-        
-        self[TokenKind::Underscore]                        = chr == '_'                           && start;
+        self.update_flag(matches!(chr, '0'..='9' | '_')       && ((start && chr != '_') || self.has(TokenKind::IntegerDecimal)), TokenKind::IntegerDecimal);
 
-        self[TokenKind::Identifier]                        = (chr.is_ascii_alphanumeric() || chr == '_') && ((start && !chr.is_ascii_digit()) || self[TokenKind::Identifier])
+        self.update_flag(chr == '_'                           && start, TokenKind::Underscore);
+
+        self.update_flag((chr.is_ascii_alphanumeric() || chr == '_') && ((start && !chr.is_ascii_digit()) || self.has(TokenKind::Identifier)), TokenKind::Identifier);
 
         // todo add keywords
 
@@ -65,35 +54,33 @@ impl Check for Possible {
     fn terminator(&self, chr: char, _buffer: &String) -> bool {
 
         assert!(self.set() == 1);
-
-        return
-            
-            if chr == ' ' || chr == '\n' || chr == '\t' { true } // these are considered valid terminators for every token
-
-            else if      self[TokenKind::Empty]   { true }
-            else if self[TokenKind::Newline] { true }
-            
-            else if self[TokenKind::Symbol(Symbol::Plus)]              { true }
-            else if self[TokenKind::Symbol(Symbol::Minus)]             { true }
-            else if self[TokenKind::Symbol(Symbol::Star)]              { true }
-            else if self[TokenKind::Symbol(Symbol::Slash)]             { true }
-            else if self[TokenKind::Symbol(Symbol::Equal)]             { true }
-            
-            else if self[TokenKind::Brace(Brace::NormalOpen)]          { true }
-            else if self[TokenKind::Brace(Brace::NormalClose)]         { true }
-
-            else if self[TokenKind::Integer(IntegerBase::Decimal)] ||
-                    self[TokenKind::Integer(IntegerBase::Hexadecimal)] ||
-                    self[TokenKind::Integer(IntegerBase::Binary)] ||
-                    self[TokenKind::Float]                             { matches!(chr, '+' | '-' | '*' | '/' | '(' | ')') }
-            
-            else if self[TokenKind::Underscore]                        { false }
-            
-            else if self[TokenKind::Identifier]                        { matches!(chr, '(' | ')') }
-            else if self[TokenKind::Keyword(Keyword::Package)]         { true }
-            
-            else { false };
         
+        if chr == ' ' || chr == '\n' || chr == '\t' { return true } // these are considered valid terminators for every token
+
+        return match self.iter().next().unwrap() { // it is done this way so I think about every one of these boiis
+            
+            TokenKind::Empty   => true,
+            TokenKind::Newline => true,
+            
+            TokenKind::SymbolPlus  => true,
+            TokenKind::SymbolMinus => true,
+            TokenKind::SymbolStar  => true,
+            TokenKind::SymbolSlash => true,
+            TokenKind::SymbolEqual => true,
+            
+            TokenKind::BraceNormalOpen  => true,
+            TokenKind::BraceNormalClose => true,
+
+            TokenKind::IntegerDecimal |
+                TokenKind::IntegerHexadecimal |
+                TokenKind::IntegerBinary |
+                TokenKind::Float => matches!(chr, '+' | '-' | '*' | '/' | '(' | ')') ,
+            
+            TokenKind::Underscore => false,
+            
+            TokenKind::Identifier => matches!(chr, '(' | ')'),
+            TokenKind::KeywordPackage => true,
+        }
     }
 
 /*     fn peek(&self, chr: char, _prev: char) -> usize {
