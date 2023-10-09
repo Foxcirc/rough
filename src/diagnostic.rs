@@ -3,6 +3,7 @@ use fancy::colorize;
 
 #[derive(Clone)]
 pub(crate) enum Level {
+    Debug,
     Info,
     Warning,
     Error,
@@ -42,22 +43,22 @@ impl Diag {
         self
     }
 
-    pub fn say(mut self, message: &str) -> Self {
-        self.message = message.into();
+    pub fn say<S: ToString>(mut self, message: S) -> Self {
+        self.message = message.to_string();
         self
     }
 
-    pub fn note(mut self, message: &str) -> Self {
-        self.notes.push(message.into());
+    pub fn note<S: ToString>(mut self, message: S) -> Self {
+        self.notes.push(message.to_string());
         self
     }
 
-    pub fn code(mut self, code: &str) -> Self {
-        self.code = Some(code.into());
+    pub fn code<S: ToString>(mut self, code: S) -> Self {
+        self.code = Some(code.to_string());
         self
     }
 
-    pub fn file(mut self, path: &str) -> Self {
+    pub fn file<S: ToString>(mut self, path: S) -> Self {
         self.file = Some(path.to_string());
         self
     }
@@ -84,6 +85,7 @@ impl Diag {
         );
 
         match self.level {
+            Level::Debug   => output.push_str(&colorize!("[white]debug: {}\n", self.message)),
             Level::Info    => output.push_str(&colorize!("[blue]info: {}\n", self.message)),
             Level::Warning => output.push_str(&colorize!("[yellow]warning: {}\n", self.message)),
             Level::Error   => output.push_str(&colorize!("[red]error: {}\n", self.message)),
@@ -108,22 +110,36 @@ impl Diag {
 
     }
 
-    pub fn info(text: &str) -> Self {
+    #[must_use]
+    pub fn debug<S: ToString>(text: S) -> Self {
+        Self::new()
+            .level(Level::Debug)
+            .say(text)
+    }
+
+    #[must_use]
+    pub fn info<S: ToString>(text: S) -> Self {
         Self::new()
             .level(Level::Info)
             .say(text)
     }
 
-    pub fn warning(text: &str) -> Self {
+    #[must_use]
+    pub fn warning<S: ToString>(text: S) -> Self {
         Self::new()
             .level(Level::Warning)
             .say(text)
     }
 
-    pub fn error(text: &str) -> Self {
+    #[must_use]
+    pub fn error<S: ToString>(text: S) -> Self {
         Self::new()
             .level(Level::Error)
             .say(text)
+    }
+
+    pub fn emit(self) {
+        eprintln!("{}", self.format());
     }
 
 }

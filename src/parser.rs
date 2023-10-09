@@ -1,6 +1,7 @@
 
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not}, combinator::{map, recognize, eof, value, cut, verify}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
+use std::ops;
 use crate::diagnostic;
 
 pub(crate) fn parse(dat: &str) -> Result<ItemList, ParseError> {
@@ -14,7 +15,7 @@ pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ItemList> {
     )(dat)
 }
 
-fn assign_item<'a>(mut dest: ItemList<'a>, item: Item<'a>) -> ItemList<'a> {
+fn assign_item<'a>(mut dest: ItemList, item: Item) -> ItemList {
     match item {
         Item::Use(val)  => dest.uses.push(val),
         Item::Fun(val)  => dest.funs.push(val),
@@ -104,20 +105,20 @@ pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
     )))(dat)
 }
 
-pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<&str> {
+pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<Span> {
     map(
         context("Ident-Non-Keyword", verify(
             context("ident", recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))),
             |ident: &ParseInput| !matches!(ident.into_fragment(), "fn" | "type" | "if" | "elif" | "else" | "loop" | "for" | "break")
         )),
-        |val: ParseInput| val.into_fragment()
+        to_span
     )(dat)
 }
 
-pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<&str> {
+pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<Span> {
     context("String-Literal-Basic", map(
         delimited(char('\"'), is_not("\"\\"), char('\"')),
-        |span: ParseInput| span.into_fragment()
+        to_span
     ),
     )(dat)
 }
@@ -184,31 +185,31 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ItemList<'a> {
-    pub uses: Vec<Use<'a>>,
-    pub funs: Vec<Fun<'a>>,
+pub(crate) struct ItemList {
+    pub uses: Vec<Use>,
+    pub funs: Vec<Fun>,
     pub types: Vec<Type>,
 }
 
-pub(crate) type Block<'a> = Vec<Op<'a>>;
+pub(crate) type Block = Vec<Op>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Item<'a> {
-    Use(Use<'a>),
-    Fun(Fun<'a>),
+pub(crate) enum Item {
+    Use(Use),
+    Fun(Fun),
     Type(Type),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Use<'a> {
-    pub path: &'a str,
+pub(crate) struct Use {
+    pub path: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Fun<'a> {
-    pub name: &'a str,
+pub(crate) struct Fun {
+    pub name: Span,
     pub signature: Vec<Type>,
-    pub block: Block<'a>,
+    pub block: Block,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -236,9 +237,9 @@ pub(crate) enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Op<'a> {
+pub(crate) enum Op {
     Push { value: Literal },
-    Call { ident: &'a str },
+    Call { ident: Span },
     Drop,
     Copy,
     Read,
@@ -253,18 +254,36 @@ pub enum Op<'a> {
     Mul,
     Div,
     Mod,
-    If   { block: Block<'a> },
-    Elif { block: Block<'a> },
-    Else { block: Block<'a> },
-    Loop { block: Block<'a> },
+    If   { block: Block },
+    Elif { block: Block },
+    Else { block: Block },
+    Loop { block: Block },
     Break,
-    For  { block: Block<'a> },
+    For  { block: Block },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Literal {
+pub(crate) enum Literal {
     Int(u64),
     Bool(bool),
-    Str(String),
+    Str(String), // owned String because we already processed escape sequences
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Span {
+    pub(crate) inner: ops::Range<usize>
+}
+
+impl Span {
+    pub(crate) fn inside<'a>(&self, src: &'a str) -> &'a str {
+        &src[self.inner.clone()]
+        //              ^^^^^^ why the heck does Range not implement Copy
+    }
+}
+
+/// compute the index range for a given LocatedSpan
+fn to_span(value: LocatedSpan<&str>) -> Span {
+    let offset = value.location_offset();
+    Span { inner: offset..offset + value.len() }
 }
 

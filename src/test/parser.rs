@@ -1,6 +1,6 @@
 
 use std::fs;
-use crate::parser::{self, ParseInput, Op};
+use crate::parser::{self, ParseInput, Op, Span};
 
 fn scnd<A, B>(tuple: (A, B)) -> B {
     tuple.1
@@ -9,10 +9,10 @@ fn scnd<A, B>(tuple: (A, B)) -> B {
 #[test]
 fn basic_parse() {
 
-    assert_eq!(parser::parse_ident(ParseInput::new("foo")).map(scnd), Ok("foo"));
-    assert_eq!(parser::parse_ident(ParseInput::new("-foo")).map(scnd), Ok("-foo"));
-    assert_eq!(parser::parse_ident(ParseInput::new("foo-bar")).map(scnd), Ok("foo-bar"));
-    assert_eq!(parser::parse_ident(ParseInput::new("foo123")).map(scnd), Ok("foo123"));
+    assert_eq!(parser::parse_ident(ParseInput::new("foo")).map(scnd), Ok(Span { inner: 0..3 }));
+    assert_eq!(parser::parse_ident(ParseInput::new("-foo")).map(scnd), Ok(Span { inner: 0..4 }));
+    assert_eq!(parser::parse_ident(ParseInput::new("foo-bar")).map(scnd), Ok(Span { inner: 0..7 }));
+    assert_eq!(parser::parse_ident(ParseInput::new("foo123")).map(scnd), Ok(Span { inner: 0..6 }));
     assert!(parser::parse_ident(ParseInput::new("123foo")).is_err());
 
     assert_eq!(parser::parse_op(ParseInput::new("add")).map(scnd), Ok(Op::Add));

@@ -6,7 +6,7 @@ pub mod diagnostic;
 pub mod parser;
 pub mod compiler;
 
-use std::{env, fs, collections::HashSet};
+use std::{env, fs, collections::{HashSet, self, VecDeque}, hash::{self, Hasher}, path::PathBuf, time};
 use crate::diagnostic::Diag;
 
 fn main() {
@@ -21,7 +21,7 @@ fn main() {
                 cli::CliError::InvalidVerbosity(other) => Diag::error("Invalid Verbosity").note(&other),
                 cli::CliError::InvalidFlag(other)      => Diag::error("Invalid Flag").note(&other),
             };
-            eprintln!("{}", diag.format());
+            diag.emit();
             return
         },
         Ok(cli::Opts { help: cli::Help::Version, .. }) => {
@@ -38,41 +38,99 @@ fn main() {
     // start parsing and discovering the project's dependencies
     // (non recursive version)
     
+    let parsing_start_time = time::Instant::now();
+    
+    let mut results  = Vec::new();
     let mut visited = HashSet::new();
-    let mut result  = Vec::new();
+    let mut paths   = VecDeque::new();
 
-    let mut files_to_process = Vec::new();
-    files_to_process.push(opts.input);
+    let (base, input) = match (opts.input.parent(), opts.input.file_name()) {
+        (Some(base), Some(input)) => (base, PathBuf::from(input)),
+        (..) => {
+            Diag::error("Invalid input path")
+                .code(&opts.input.to_string_lossy())
+                .emit();
+            return
+        },
+    };
 
-    while let Some(file) = files_to_process.pop() {
+    paths.push_back(input);
 
-        if !visited.insert(Clone::clone(&file)) { continue }; // todo: remove this clone
+    while let Some(path) = paths.pop_front() {
 
-        let content_raw = fs::read(file).expect("todo: (io-error) cannot open file");
-        let content = String::from_utf8(content_raw).expect("todo: (utf8-error) input file is not valid utf8");
+        if !visited.insert(path.clone()) { continue };
 
-        result.push(SourceFile { content, items: parser::ItemList::default() });
-        let source_file = result.last_mut().expect("No last element");
+        let human_name = match path.file_name() {
+            Some(val) => val.to_string_lossy().to_string(),
+            None => {
+                Diag::error("Invalid source-file path").emit();
+                return
+            }
+        };
 
-        let items = parser::parse(&source_file.content).expect("todo: (parse-error) invalid source file");
+        let content_raw = match fs::read(base.join(&path)) {
+            Ok(val) => val,
+            Err(err) => {
+                Diag::error("Cannot read source-file")
+                    .code(human_name)
+                    .note(err)
+                    .emit();
+                return
+            }
+        };
 
-        let uses: Vec<String> = items.uses.iter().map(|item| item.path.to_string()).collect(); // todo: also borrow 'a ??
-        files_to_process.extend(uses);
+        let content = match String::from_utf8(content_raw) {
+            Ok(val) => val,
+            Err(err) => {
+                Diag::error("Source file contains invalid Utf-8")
+                    .code(human_name)
+                    .note(err)
+                    .emit();
+                return
+            }
+        };
 
-        source_file.items = items; // todo: fuck, this is a self-referencial struct no?
+        let items = match parser::parse(&content) {
+            Ok(val) => val,
+            Err(err) => {
+                parser::format_parse_error(err).emit();
+                return
+            }
+        };
+
+        for item in items.uses.iter() {
+            paths.push_back(PathBuf::from(item.path.inside(&content)));
+        }
+
+        results.push(SourceFile { name: human_name, content, items });
 
     }
 
-    println!("Files visited: {:?}", visited);
+    if opts.debug() {
+        let files: Vec<_> = results.iter().map(|item| &item.name[..]).collect();
+        Diag::debug("Parsing done")
+            .note(format!("Took: {:?}", time::Instant::now() - parsing_start_time))
+            .note(format!("In total {} files visited: {}", results.len(), files.join(", ")))
+            .emit();
+    }
+
+    // we now need to parse the files in reverse order
+    results.reverse();
+
+
 
 }
 
-struct SourceFile<'a> {
+#[derive(Debug)]
+struct SourceFile {
+    pub(crate) name: String,
     pub(crate) content: String,
-    pub(crate) items: parser::ItemList<'a>
+    pub(crate) items: parser::ItemList
 }
 
 mod cli {
+
+    use std::path::PathBuf;
 
     pub(crate) const VERSION: &str = "rough 0.0.1 (experimental build)";
 
@@ -111,11 +169,11 @@ Written by Foxcirc.
                 Some("-h" | "--help") => opts.help = Help::Info,
                 Some("--version")     => opts.help = Help::Version,
                 Some("-i" | "--input")  => opts.input = match args.next().as_deref() {
-                    Some(path) => path.to_string(),
+                    Some(path) => PathBuf::from(path),
                     None => return Err(CliError::ExpectedPath)
                 },
                 Some("-o" | "--output") => opts.output = match args.next().as_deref() {
-                    Some(path) => path.to_string(),
+                    Some(path) => PathBuf::from(path),
                     None => return Err(CliError::ExpectedPath)
                 },
                 Some("-m" | "--mode") => opts.mode = match args.next().as_deref() {
@@ -134,7 +192,7 @@ Written by Foxcirc.
                     None          => return Err(CliError::ExpectedVerbosity)
                 },
                 Some(other) if other.starts_with('-') => return Err(CliError::InvalidFlag(other.to_string())),
-                Some(other)                           => opts.input = other.to_string(),
+                Some(other)                           => opts.input = PathBuf::from(other),
                 None => break,
             }
         }
@@ -155,10 +213,16 @@ Written by Foxcirc.
     #[derive(Default)]
     pub(crate) struct Opts {
         pub(crate) help: Help, // show help menu: -h, --help
-        pub(crate) input: String, // the input file to compile: [file], -i, --i [file]
-        pub(crate) output: String, // the output path: -o, --output [path]
+        pub(crate) input: PathBuf, // the input file to compile: [file], -i, --i [file]
+        pub(crate) output: PathBuf, // the output path: -o, --output [path]
         pub(crate) mode: Mode, // what to do: -m, --mode [mode]
         pub(crate) verbosity: Verbosity, // how verbose to be: -v , --verbose [verbosity]
+    }
+
+    impl Opts {
+        pub(crate) fn debug(&self) -> bool {
+            matches!(self.verbosity, Verbosity::Debug)
+        }
     }
 
     #[derive(Default)]
