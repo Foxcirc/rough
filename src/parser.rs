@@ -82,17 +82,21 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
             value(Op::Mod,   tag("mod")),
         )),
         alt((
-            value(Op::Break, tag("break")),
             map(preceded(pair(tag("if"),   multispace0), cut(context("if",   parse_block))), |block| Op::If   { block }),
             map(preceded(pair(tag("elif"), multispace0), cut(context("elif", parse_block))), |block| Op::Elif { block }),
             map(preceded(pair(tag("else"), multispace0), cut(context("else", parse_block))), |block| Op::Else { block }),
             map(preceded(pair(tag("loop"), multispace0), cut(context("loop", parse_block))), |block| Op::Loop { block }),
             map(preceded(pair(tag("for"),  multispace0), cut(context("for",  parse_block))), |block| Op::For  { block }),
+            value(Op::Break, tag("break")),
         )),
         alt((
-            map(terminated(parse_integer, cut(multispace1)), |integer| Op::Push { value: Literal::Int(integer) }),
-            map(terminated(parse_str_escaped,     cut(multispace1)), |string|  Op::Push { value: Literal::Str(string) }),
-            map(terminated(parse_ident,   cut(multispace1)), |ident|   Op::Call { ident })
+            value(Op::Push { value: Literal::Bool(true) },  tag("true")),
+            value(Op::Push { value: Literal::Bool(false) }, tag("false")),
+        )),
+        alt((
+            map(terminated(parse_integer,     cut(multispace1)), |integer| Op::Push { value: Literal::Int(integer) }),
+            map(terminated(parse_str_escaped, cut(multispace1)), |string|  Op::Push { value: Literal::Str(string) }),
+            map(terminated(parse_ident,       cut(multispace1)), |ident|   Op::Call { ident })
         )),
     )))(dat)
 }
