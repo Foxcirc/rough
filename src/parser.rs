@@ -1,5 +1,5 @@
 
-use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not}, combinator::{map, recognize, eof, value, cut, verify}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
+use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
 use std::ops;
 use crate::diagnostic;
@@ -11,7 +11,7 @@ pub(crate) fn parse(dat: &str) -> Result<ItemList, ParseError> {
 pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ItemList> {
     terminated(
         fold_many0(delimited(multispace0, parse_item, multispace0), ItemList::default, assign_item),
-        context("Item-List", eof)
+        context("expected top level item", eof)
     )(dat)
 }
 
@@ -25,40 +25,40 @@ fn assign_item<'a>(mut dest: ItemList, item: Item) -> ItemList {
 }
 
 pub(crate) fn parse_item(dat: ParseInput) ->  ParseResult<Item> {
-    context("Item", alt((
+    alt((
         preceded(tag("use"),  parse_use),
         preceded(tag("fn"),   parse_fun),
         preceded(tag("type"), parse_type),
-    )))(dat)
+    ))(dat)
 }
 
 pub(crate) fn parse_use(dat: ParseInput) -> ParseResult<Item> {
-    context("Use", map(
-        tuple((multispace0, cut(context("Module-Path", parse_str_basic)))),
+    map(
+        tuple((multispace0, cut(parse_str_basic))),
         |(_, path)| Item::Use(Use { path })
-    ))(dat)
+    )(dat)
 }
 
 pub(crate) fn parse_fun(dat: ParseInput) -> ParseResult<Item> {
-    context("Fn", map(
-        tuple((multispace0, cut(context("Fn-Name", parse_ident)), multispace0, cut(context("Fn-Body", parse_block)))),
+    map(
+        tuple((multispace0, cut(parse_ident), multispace0, cut(parse_block))),
         |(_, name, _, block)| Item::Fun(Fun { name, signature: Vec::new(), block })
-    ))(dat)
+    )(dat)
 }
 
 pub(crate) fn parse_type(dat: ParseInput) -> ParseResult<Item> {
-    context("Type", map(
-        tuple((multispace0, cut(context("Type-Name", parse_ident)))),
+    map(
+        tuple((multispace0, cut(parse_ident))),
         |(_, _)| Item::Type(Type::Int)
-    ))(dat)
+    )(dat)
 }
 
 pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
-    context("Block", delimited(
-        char('{'),
+    delimited(
+        context("expected block", char('{')),
         delimited(multispace0, many0(delimited(multispace0, parse_op, multispace0)), multispace0),
-        char('}')
-    ))(dat)
+        context("invalid operation",  char('}'))
+    )(dat)
 }
 
 pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
@@ -82,11 +82,11 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
             value(Op::Mod,   tag("mod")),
         )),
         alt((
-            map(preceded(pair(tag("if"),   multispace0), cut(context("if",   parse_block))), |block| Op::If   { block }),
-            map(preceded(pair(tag("elif"), multispace0), cut(context("elif", parse_block))), |block| Op::Elif { block }),
-            map(preceded(pair(tag("else"), multispace0), cut(context("else", parse_block))), |block| Op::Else { block }),
-            map(preceded(pair(tag("loop"), multispace0), cut(context("loop", parse_block))), |block| Op::Loop { block }),
-            map(preceded(pair(tag("for"),  multispace0), cut(context("for",  parse_block))), |block| Op::For  { block }),
+            map(preceded(pair(tag("if"),   multispace0), cut(parse_block)), |block| Op::If   { block }),
+            map(preceded(pair(tag("elif"), multispace0), cut(parse_block)), |block| Op::Elif { block }),
+            map(preceded(pair(tag("else"), multispace0), cut(parse_block)), |block| Op::Else { block }),
+            map(preceded(pair(tag("loop"), multispace0), cut(parse_block)), |block| Op::Loop { block }),
+            map(preceded(pair(tag("for"),  multispace0), cut(parse_block)), |block| Op::For  { block }),
             value(Op::Break, tag("break")),
         )),
         alt((
@@ -94,43 +94,66 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
             value(Op::Push { value: Literal::Bool(false) }, tag("false")),
         )),
         alt((
-            map(terminated(parse_integer,     cut(multispace1)), |integer| Op::Push { value: Literal::Int(integer) }),
-            map(terminated(parse_str_escaped, cut(multispace1)), |string|  Op::Push { value: Literal::Str(string) }),
-            map(terminated(parse_ident,       cut(multispace1)), |ident|   Op::Call { ident })
+            map(
+                terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
+                |integer| Op::Push { value: Literal::Int(integer) }
+            ),
+            map(parse_str_escaped, |string|  Op::Push { value: Literal::Str(string) }),
+            map(parse_ident,       |ident|   Op::Call { ident })
         )),
     )))(dat)
 }
 
 pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
-    context("Integer-Literal", alt((
-        map(preceded(alt((tag("0x"), tag("0X"))), recognize(many1(one_of("0123456789abcdefABCDEF")))), |val: ParseInput| u64::from_str_radix(val.into_fragment(), 16).unwrap()),
-        map(preceded(alt((tag("0b"), tag("0B"))), recognize(many1(one_of("01")))),                     |val: ParseInput| u64::from_str_radix(val.into_fragment(), 2).unwrap()),
-        map(                                      recognize(many1(one_of("0123456789"))),              |val: ParseInput| u64::from_str_radix(val.into_fragment(), 10).unwrap()),
-    )))(dat)
+
+    use nom::{Err as NomErr, error::ErrorKind};
+
+    let parse_int = |radix| move |input: ParseInput| u64::from_str_radix(input.into_fragment(), radix);
+
+    let mut result: IResult<_, _, ParseError> = context("expected integer", alt((
+        map_res(preceded(alt((tag("0x"), tag("0X"))), recognize(many1(one_of("0123456789abcdefABCDEF")))), parse_int(16)),
+        map_res(preceded(alt((tag("0b"), tag("0B"))), recognize(many1(one_of("01")))),                     parse_int(2)),
+        map_res(                                      recognize(many1(one_of("0123456789"))),              parse_int(10)),
+    )))(dat);
+
+    // check if the integer literal was too large and make that a hard error
+    if let Err(NomErr::Error(mut val)) = result {
+        let verbose_error = val.errors.get(val.errors.len() - 3);
+        if let Some((span, VerboseErrorKind::Nom(ErrorKind::MapRes))) = verbose_error {
+            let span_clone = span.clone();
+            let ctx = val.errors.last_mut().expect("No last error"); // swap the last error with this
+            *ctx = (span_clone, VerboseErrorKind::Context("integer literal too large"));
+            result = Err(NomErr::Failure(val))
+        } else {
+            result = Err(NomErr::Error(val))
+        }
+    }
+
+    result
 }
 
 pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<Span> {
     map(
-        context("Ident-Non-Keyword", verify(
-            context("ident", recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))),
-            |ident: &ParseInput| !matches!(ident.into_fragment(), "fn" | "type" | "if" | "elif" | "else" | "loop" | "for" | "break")
+        context("identifier cannot be a keyword", verify(
+            context("expected identifier", recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))),
+            |ident: &ParseInput| !matches!(ident.into_fragment(), "fn" | "type" | "if" | "elif" | "else" | "loop" | "for" | "break" | "true" | "false")
         )),
         to_span
     )(dat)
 }
 
 pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<Span> {
-    context("String-Literal-Basic", map(
-        delimited(char('\"'), is_not("\"\\"), char('\"')),
+    context("expected string literal", map(
+        delimited(char('\"'), is_not("\""), char('\"')),
         to_span
     ),
     )(dat)
 }
 
 pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
-    context("String-Literal-Escaped", delimited(
+    context("expected string literal", delimited(
         char('\"'),
-        escaped_transform(
+        cut(context("invalid escape sequence", escaped_transform(
             is_not("\"\\"),
             '\\',
             alt((
@@ -138,7 +161,7 @@ pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
                 value("\"", tag("\"")),
                 value("\n", tag("n"))
             ))
-        ),
+        ))),
         char('\"')
     ))(dat)
 }
@@ -149,19 +172,19 @@ pub(crate) type ParseError<'a> = VerboseError<ParseInput<'a>>;
 
 pub(crate) fn format_parse_error(value: ParseError) -> diagnostic::Diag {
 
-    let mut diag = diagnostic::Diag::error("Unexpected-Token");
+    let mut diag = diagnostic::Diag::error("invalid source file");
 
     if let Some((span, _)) = value.errors.first() {
         let code = std::str::from_utf8(span.get_line_beginning()).expect("Invalid Utf-8");
-        let (before, highlight, after) = split_at_char_index(code, span.get_column() - 1);
-        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after));
+        let (before, highlight, after) = split_at_byte_index(code, span.get_utf8_column() - 1);
+        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
         diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column() });
         diag.file = Some(String::from("input.rh"));
     }
 
     for (_, kind) in value.errors.iter() {
         if let VerboseErrorKind::Context(message) = kind {
-            diag.notes.push(format!("while parsing {}", message));
+            diag.notes.push(message.to_string());
             break
         }
     }
@@ -170,7 +193,7 @@ pub(crate) fn format_parse_error(value: ParseError) -> diagnostic::Diag {
 
 }
 
-fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
+fn split_at_byte_index(input: &str, index: usize) -> (&str, &str, &str) {
     let mut before = "";
     let mut target = "";
     let mut after  = "";

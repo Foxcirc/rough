@@ -92,14 +92,14 @@ impl Diag {
         }
 
         match (&self.file, &self.pos) {
-            (Some(path), Some(pos)) => output.push_str(&colorize!("    [246]at {}:{}:{}\n", path, pos.line, pos.column)),
+            (Some(path), Some(pos)) => output.push_str(&colorize!("    [246]in {}:{}:{}\n", path, pos.line, pos.column)),
             (Some(path), None     ) => output.push_str(&colorize!("    [246]in file {}\n", path)),
-            (None,       Some(pos)) => output.push_str(&colorize!("    [246]at {}:{}\n", pos.line, pos.column)),
+            (None,       Some(pos)) => output.push_str(&colorize!("    [246]at position {}:{}\n", pos.line, pos.column)),
             (..) => (),
         }
 
         if let Some(code) = &self.code {
-            output.push_str(&colorize!("    [245]in `{}`\n", code));
+            output.push_str(&colorize!("    [245]at `{}`\n", code));
         }
 
         for note in self.notes.clone() {
