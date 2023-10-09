@@ -1,24 +1,26 @@
 
 use std::fs;
+use crate::parser::{self, ParseInput, Op};
 
-use crate::parser::{Parser, Op, Fun, PItem, Item};
+fn scnd<A, B>(tuple: (A, B)) -> B {
+    tuple.1
+}
 
 #[test]
 fn basic_parse() {
 
-    assert_eq!(Parser::parse_ident("foo"), Ok(("", "foo")));
-    assert_eq!(Parser::parse_ident("-foo"), Ok(("", "-foo")));
-    assert_eq!(Parser::parse_ident("foo-bar"), Ok(("", "foo-bar")));
-    assert_eq!(Parser::parse_ident("foo123"), Ok(("", "foo123")));
-    assert!(Parser::parse_ident("123foo").is_err());
+    assert_eq!(parser::parse_ident(ParseInput::new("foo")).map(scnd), Ok("foo"));
+    assert_eq!(parser::parse_ident(ParseInput::new("-foo")).map(scnd), Ok("-foo"));
+    assert_eq!(parser::parse_ident(ParseInput::new("foo-bar")).map(scnd), Ok("foo-bar"));
+    assert_eq!(parser::parse_ident(ParseInput::new("foo123")).map(scnd), Ok("foo123"));
+    assert!(parser::parse_ident(ParseInput::new("123foo")).is_err());
 
-    assert_eq!(Parser::parse_op("add"), Ok(("", Op::Add)));
+    assert_eq!(parser::parse_op(ParseInput::new("add")).map(scnd), Ok(Op::Add));
+    assert_eq!(parser::parse_str_escaped(ParseInput::new("\"add\"")).map(scnd), Ok(String::from("add")));
+    assert_eq!(parser::parse_str_escaped(ParseInput::new("\"\\\"\"")).map(scnd),  Ok(String::from("\"")));
 
-    assert_eq!(Parser::parse_block("{add\tadd}"), Ok(("", vec![Op::Add, Op::Add])));
-    assert_eq!(Parser::parse_block("{\nadd add\n    add add\n\n}"), Ok(("", vec![Op::Add, Op::Add, Op::Add, Op::Add])));
-
-    assert_eq!(Parser::parse_fun("main { add add }"), Ok(("", PItem::Fun(Item { name: "main", quals: vec![], inner: Fun { sig: vec![], block: vec![Op::Add, Op::Add] } }))));
-    assert_eq!(Parser::parse_pitem("fun main { add add }"), Ok(("", PItem::Fun(Item { name: "main", quals: vec![], inner: Fun { sig: vec![], block: vec![Op::Add, Op::Add] } }))));
+    assert_eq!(parser::parse_block(ParseInput::new("{add\tadd}")).map(scnd), Ok(vec![Op::Add, Op::Add]));
+    assert_eq!(parser::parse_block(ParseInput::new("{\nadd add\n    add add\n\n}")).map(scnd), Ok(vec![Op::Add, Op::Add, Op::Add, Op::Add]));
 
 }
 
@@ -27,11 +29,13 @@ fn full_parse() {
 
     let code = fs::read_to_string("src/test/parser.rh").expect("Cannot not read file");
 
-    let result = Parser::parse(&code);
+    let result = parser::parse(&code);
 
-    println!("{:?}", result);
-
-    assert!(result.is_ok())
+    match result {
+        Ok(val) => println!("{val:?}"),
+        Err(err) => panic!("\n{}\n", crate::parser::format_parse_error(err).format()),
+        // Err(err) => panic!("\n{err:?}\n"),
+    }
 
 }
 

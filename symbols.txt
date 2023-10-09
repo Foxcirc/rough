@@ -1,0 +1,36 @@
+
+Symbols:
+
+> ptr-read
+< ptr-write
+
++ ???
+* copy
+~ drop
+/ ???
+# attribute
+$ ???
+% ???
+& addr-of
+? type-of
+! size-of
+: ???
+. access
+
+() stack scope
+{} code scope
+[] ???
+
+Keywords:
+
+fn
+type
+impl
+if
+elif
+else
+for
+loop
+break
+ret
+

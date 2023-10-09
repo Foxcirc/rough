@@ -1,153 +1,270 @@
 
-use nom::{IResult, branch::alt, multi::{count, many1, many0}, sequence::{tuple, pair, terminated, delimited, preceded}, bytes::complete::{tag, take_while}, combinator::{cut, opt, recognize, map, eof, success, verify, peek, fail, not, value}, character::{complete::{alpha1, alphanumeric1, line_ending, multispace1, multispace0, space1, space0}}, complete::take, error::ParseError as NomParseError};
+use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not}, combinator::{map, recognize, eof, value, cut, verify}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
+use nom_locate::LocatedSpan;
+use crate::diagnostic;
 
-pub struct Parser {
-    
+pub(crate) fn parse(dat: &str) -> Result<ItemList, ParseError> {
+    parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
 }
 
-impl Parser {
+pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ItemList> {
+    terminated(
+        fold_many0(delimited(multispace0, parse_item, multispace0), ItemList::default, assign_item),
+        context("Item-List", eof)
+    )(dat)
+}
 
-    pub fn parse(dat: &str) -> Result<Code, ParseError> {
+fn assign_item<'a>(mut dest: ItemList<'a>, item: Item<'a>) -> ItemList<'a> {
+    match item {
+        Item::Use(val)  => dest.uses.push(val),
+        Item::Fun(val)  => dest.funs.push(val),
+        Item::Type(val) => dest.types.push(val),
+    }
+    dest
+}
 
-        let (dat, words) = many0(Self::spaced(Self::parse_pitem))(dat)?;
-        eof(dat)?;
+pub(crate) fn parse_item(dat: ParseInput) ->  ParseResult<Item> {
+    context("Item", alt((
+        preceded(tag("use"),  parse_use),
+        preceded(tag("fn"),   parse_fun),
+        preceded(tag("type"), parse_type),
+    )))(dat)
+}
 
-        println!("Words: {:?}", words);
+pub(crate) fn parse_use(dat: ParseInput) -> ParseResult<Item> {
+    context("Use", map(
+        tuple((multispace0, cut(context("Module-Path", parse_str_basic)))),
+        |(_, path)| Item::Use(Use { path })
+    ))(dat)
+}
 
-        Ok(Code {
-            funs: Vec::new(),
-            types: Vec::new(),
-        })
+pub(crate) fn parse_fun(dat: ParseInput) -> ParseResult<Item> {
+    context("Fn", map(
+        tuple((multispace0, cut(context("Fn-Name", parse_ident)), multispace0, cut(context("Fn-Body", parse_block)))),
+        |(_, name, _, block)| Item::Fun(Fun { name, signature: Vec::new(), block })
+    ))(dat)
+}
 
+pub(crate) fn parse_type(dat: ParseInput) -> ParseResult<Item> {
+    context("Type", map(
+        tuple((multispace0, cut(context("Type-Name", parse_ident)))),
+        |(_, _)| Item::Type(Type::Int)
+    ))(dat)
+}
+
+pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
+    context("Block", delimited(
+        char('{'),
+        delimited(multispace0, many0(delimited(multispace0, parse_op, multispace0)), multispace0),
+        char('}')
+    ))(dat)
+}
+
+pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
+    context("Op", alt((
+        alt((
+            value(Op::Copy,   char('*')),
+            value(Op::Drop,   char('~')),
+            value(Op::Read,   char('>')),
+            value(Op::Write,  char('<')),
+            value(Op::Move,   char('~')),
+            value(Op::Addr,   char('&')),
+            value(Op::Type,   char('?')),
+            value(Op::Size,   char('!')),
+            value(Op::Access, char('.')),
+        )),
+        alt((
+            value(Op::Add,   tag("add")),
+            value(Op::Sub,   tag("sub")),
+            value(Op::Mul,   tag("mul")),
+            value(Op::Div,   tag("div")),
+            value(Op::Mod,   tag("mod")),
+        )),
+        alt((
+            value(Op::Break, tag("break")),
+            map(preceded(pair(tag("if"),   multispace0), cut(context("if",   parse_block))), |block| Op::If   { block }),
+            map(preceded(pair(tag("elif"), multispace0), cut(context("elif", parse_block))), |block| Op::Elif { block }),
+            map(preceded(pair(tag("else"), multispace0), cut(context("else", parse_block))), |block| Op::Else { block }),
+            map(preceded(pair(tag("loop"), multispace0), cut(context("loop", parse_block))), |block| Op::Loop { block }),
+            map(preceded(pair(tag("for"),  multispace0), cut(context("for",  parse_block))), |block| Op::For  { block }),
+        )),
+        alt((
+            map(terminated(parse_integer, cut(multispace1)), |integer| Op::Push { value: Literal::Int(integer) }),
+            map(terminated(parse_str_escaped,     cut(multispace1)), |string|  Op::Push { value: Literal::Str(string) }),
+            map(terminated(parse_ident,   cut(multispace1)), |ident|   Op::Call { ident })
+        )),
+    )))(dat)
+}
+
+pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
+    context("Integer-Literal", alt((
+        map(preceded(alt((tag("0x"), tag("0X"))), recognize(many1(one_of("0123456789abcdefABCDEF")))), |val: ParseInput| u64::from_str_radix(val.into_fragment(), 16).unwrap()),
+        map(preceded(alt((tag("0b"), tag("0B"))), recognize(many1(one_of("01")))),                     |val: ParseInput| u64::from_str_radix(val.into_fragment(), 2).unwrap()),
+        map(                                      recognize(many1(one_of("0123456789"))),              |val: ParseInput| u64::from_str_radix(val.into_fragment(), 10).unwrap()),
+    )))(dat)
+}
+
+pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<&str> {
+    map(
+        context("Ident-Non-Keyword", verify(
+            context("ident", recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))),
+            |ident: &ParseInput| !matches!(ident.into_fragment(), "fn" | "type" | "if" | "elif" | "else" | "loop" | "for" | "break")
+        )),
+        |val: ParseInput| val.into_fragment()
+    )(dat)
+}
+
+pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<&str> {
+    context("String-Literal-Basic", map(
+        delimited(char('\"'), is_not("\"\\"), char('\"')),
+        |span: ParseInput| span.into_fragment()
+    ),
+    )(dat)
+}
+
+pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
+    context("String-Literal-Escaped", delimited(
+        char('\"'),
+        escaped_transform(
+            is_not("\"\\"),
+            '\\',
+            alt((
+                value("\\", tag("\\")),
+                value("\"", tag("\"")),
+                value("\n", tag("n"))
+            ))
+        ),
+        char('\"')
+    ))(dat)
+}
+
+pub(crate) type ParseResult<'a, O> = IResult<ParseInput<'a>, O, ParseError<'a>>;
+pub(crate) type ParseInput<'a> = LocatedSpan<&'a str>; // todo convert to LocatedSpan<str> for use with convert_error
+pub(crate) type ParseError<'a> = VerboseError<ParseInput<'a>>;
+
+pub(crate) fn format_parse_error(value: ParseError) -> diagnostic::Diag {
+
+    let mut diag = diagnostic::Diag::error("Unexpected-Token");
+
+    if let Some((span, _)) = value.errors.first() {
+        let code = std::str::from_utf8(span.get_line_beginning()).expect("Invalid Utf-8");
+        let (before, highlight, after) = split_at_char_index(code, span.get_column() - 1);
+        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after));
+        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column() });
+        diag.file = Some(String::from("input.rh"));
     }
 
-    pub(crate) fn parse_pitem(dat: &str) ->  IResult<&str, PItem> {
-        let result = alt((
-            preceded(tag("fun"), cut(Self::parse_fun)),
-            preceded(tag("new"), cut(Self::parse_type)),
-        ))(dat)?;
-        Ok(result)
+    for (_, kind) in value.errors.iter() {
+        if let VerboseErrorKind::Context(message) = kind {
+            diag.notes.push(format!("while parsing {}", message));
+            break
+        }
     }
 
-    pub(crate) fn parse_type(dat: &str) -> IResult<&str, PItem> {
-        nom::combinator::fail(dat)
-    }
-
-    pub(crate) fn parse_fun(dat: &str) -> IResult<&str, PItem> {
-        let (dat, name) = Self::parse_fun_head(dat)?;
-        let (dat, block) = Self::parse_block(dat)?;
-        let fun = Fun { sig: Vec::new(), block };
-        let item = PItem::Fun(Item { name, quals: Vec::new(), inner: fun });
-        Ok((dat, item))
-    }
-
-    pub(crate) fn parse_fun_head(dat: &str) -> IResult<&str, &str> {
-        Self::spaced(Self::parse_ident)(dat)
-    }
-
-    pub(crate) fn parse_block(dat: &str) -> IResult<&str, Block> {
-        delimited(tag("{"), many0(Self::spaced(Self::parse_op)), tag("}"))(dat)
-    }
-
-    pub(crate) fn parse_op(dat: &str) -> IResult<&str, Op> {
-        let (mut dat, ident) = Self::parse_ident(dat)?;
-        let op = match ident {
-            "add" => Op::Add,
-            "sub" => Op::Sub,
-            "mul" => Op::Mul,
-            "div" => Op::Div,
-            "mod" => Op::Mod,
-            "if" => {
-                let (next, block) = Self::spaced(Self::parse_block)(dat)?;
-                dat = next;
-                Op::If { block }
-            },
-            "elif" => {
-                let (next, block) = Self::spaced(Self::parse_block)(dat)?;
-                dat = next;
-                Op::Elif { block }
-            },
-            "else" => {
-                let (next, block) = Self::spaced(Self::parse_block)(dat)?;
-                dat = next;
-                Op::Else { block }
-            },
-            "eq" => Op::Eq,
-            _other => todo!(),
-        };
-        Ok((dat, op))
-    }
-
-    pub(crate) fn parse_ident(dat: &str) -> IResult<&str, &str> {
-        recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))(dat)
-    }
-
-    fn spaced<'d, O, E: nom::error::ParseError<&'d str>, P: nom::Parser<&'d str, O, E>>(parser: P) -> impl FnMut(&'d str) -> IResult<&'d str, O, E> {
-        delimited(multispace0, parser, multispace0)
-    }
+    diag
 
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PItem<'a> {
-    Fun(Item<'a, Fun>),
-    Type(Item<'a, Type>),
-}
+fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
+    let mut before = "";
+    let mut target = "";
+    let mut after  = "";
 
-#[derive(Debug, PartialEq)]
-pub struct ParseError<'a> {
-    inner: nom::Err<nom::error::Error<&'a str>>,
-}
-
-impl<'a> From<nom::Err<nom::error::Error<&'a str>>> for ParseError<'a> {
-    fn from(inner: nom::Err<nom::error::Error<&'a str>>) -> Self {
-        Self { inner }
+    for (char_index, (byte_index, chr)) in input.char_indices().enumerate() {
+        if char_index == index {
+            target = &input[byte_index..byte_index + chr.len_utf8()];
+        } else if char_index > index {
+            after = &input[byte_index..];
+            break;
+        }
+        before = &input[..byte_index];
     }
+
+    (before, target, after)
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Code<'a> {
-    pub funs: Vec<Item<'a, Fun>>,
-    pub types: Vec<Item<'a, Type>>,
+#[derive(Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ItemList<'a> {
+    pub uses: Vec<Use<'a>>,
+    pub funs: Vec<Fun<'a>>,
+    pub types: Vec<Type>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Item<'a, T> {
+pub(crate) type Block<'a> = Vec<Op<'a>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Item<'a> {
+    Use(Use<'a>),
+    Fun(Fun<'a>),
+    Type(Type),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Use<'a> {
+    pub path: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Fun<'a> {
     pub name: &'a str,
-    pub quals: Vec<ItemQual>,
-    pub inner: T,
+    pub signature: Vec<Type>,
+    pub block: Block<'a>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ItemQual {
-    Pub,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Type {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Type {
+    // standard types
     Int,
     Bool,
+    Ptr { inner: Box<Type> },
+    // fine-grained types
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    // type
+    Type,
+    // complex types
+    Array { inner: Box<Type>, length: u64 },
+    Tuple { inner: Vec<Type> },
+    // user types (newtype)
+    // New { name: &'a str, size: u64 }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Fun {
-    pub sig: Vec<Type>,
-    pub block: Block,
-}
-
-pub type Block = Vec<Op>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Op {
-    Push,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Op<'a> {
+    Push { value: Literal },
+    Call { ident: &'a str },
+    Drop,
+    Copy,
+    Read,
+    Write,
+    Move,
+    Addr,
+    Type,
+    Size,
+    Access,
     Add,
     Sub,
     Mul,
     Div,
     Mod,
-    If { block: Block },
-    Elif { block: Block },
-    Else { block: Block },
-    Eq,
+    If   { block: Block<'a> },
+    Elif { block: Block<'a> },
+    Else { block: Block<'a> },
+    Loop { block: Block<'a> },
+    Break,
+    For  { block: Block<'a> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Literal {
+    Int(u64),
+    Bool(bool),
+    Str(String),
 }
 

@@ -1,7 +1,24 @@
 
-fun main {
-    add add
-    if { sub sub }
-    add
+use "std/thread.rh"
+
+type Box
+
+fn main {
+    42 -print-int
+    "→ Rough times ←"
+}
+
+fn -print-int {
+    
+    add if {
+
+    }
+    sub elif {
+
+    }
+    else {
+
+    }
+
 }
 
