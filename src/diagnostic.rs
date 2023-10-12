@@ -16,7 +16,7 @@ pub(crate) struct Pos {
 }
 
 #[derive(Clone)]
-pub(crate) struct Diag {
+pub(crate) struct Diagnostic {
     pub(crate) level: Level,
     pub(crate) message: String,
     pub(crate) notes: Vec<String>,
@@ -25,7 +25,7 @@ pub(crate) struct Diag {
     pub(crate) code: Option<String>,
 }
 
-impl Diag {
+impl Diagnostic {
 
     pub fn new() -> Self {
         Self {
@@ -85,25 +85,25 @@ impl Diag {
         );
 
         match self.level {
-            Level::Debug   => output.push_str(&colorize!("[white]debug: {}\n", self.message)),
+            Level::Debug   => output.push_str(&colorize!("[blue]debug: {}\n", self.message)),
             Level::Info    => output.push_str(&colorize!("[blue]info: {}\n", self.message)),
             Level::Warning => output.push_str(&colorize!("[yellow]warning: {}\n", self.message)),
             Level::Error   => output.push_str(&colorize!("[red]error: {}\n", self.message)),
         }
 
         match (&self.file, &self.pos) {
-            (Some(path), Some(pos)) => output.push_str(&colorize!("    [246]in {}:{}:{}\n", path, pos.line, pos.column)),
-            (Some(path), None     ) => output.push_str(&colorize!("    [246]in file {}\n", path)),
-            (None,       Some(pos)) => output.push_str(&colorize!("    [246]at position {}:{}\n", pos.line, pos.column)),
+            (Some(path), Some(pos)) => output.push_str(&colorize!("[def]    in {}:{}:{}\n", path, pos.line, pos.column)),
+            (Some(path), None     ) => output.push_str(&colorize!("[def]    in file {}\n", path)),
+            (None,       Some(pos)) => output.push_str(&colorize!("[def]    at position {}:{}\n", pos.line, pos.column)),
             (..) => (),
         }
 
         if let Some(code) = &self.code {
-            output.push_str(&colorize!("    [245]at `{}`\n", code));
+            output.push_str(&colorize!("[def]    at `{}`\n", code));
         }
 
         for note in self.notes.clone() {
-            output.push_str(&colorize!("[30]  note: [247]{}\n", note));
+            output.push_str(&colorize!("[def]  note: {}\n", note));
         }
 
         output
@@ -139,7 +139,7 @@ impl Diag {
     }
 
     pub fn emit(self) {
-        eprintln!("{}", self.format());
+        eprint!("{}", self.format());
     }
 
 }

@@ -1,22 +1,22 @@
 
-use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
+use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
-use std::ops;
 use crate::diagnostic;
 
-pub(crate) fn parse(dat: &str) -> Result<ItemList, ParseError> {
-    parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
+pub(crate) fn parse(dat: &str, span_id: usize) -> Result<ParseTranslationUnit, ParseError> {
+    parse_items(LocatedSpan::new_extra(dat, span_id)).finish().map(|(_, items)| items)
 }
 
-pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ItemList> {
+pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ParseTranslationUnit> {
     terminated(
-        fold_many0(delimited(multispace0, parse_item, multispace0), ItemList::default, assign_item),
-        context("expected top level item", eof)
+        fold_many0(delimited(multispace0, parse_item, multispace0), TranslationUnit::default, assign_item),
+        context("expected top level item", pair(multispace0, eof)) // this is there to allow empty files
     )(dat)
 }
 
-fn assign_item<'a>(mut dest: ItemList, item: Item) -> ItemList {
+fn assign_item<'a>(mut dest: ParseTranslationUnit, item: Item) -> ParseTranslationUnit {
     match item {
+        Item::Comment   => (),
         Item::Use(val)  => dest.uses.push(val),
         Item::Fun(val)  => dest.funs.push(val),
         Item::Type(val) => dest.types.push(val),
@@ -26,9 +26,17 @@ fn assign_item<'a>(mut dest: ItemList, item: Item) -> ItemList {
 
 pub(crate) fn parse_item(dat: ParseInput) ->  ParseResult<Item> {
     alt((
-        preceded(tag("use"),  parse_use),
-        preceded(tag("fn"),   parse_fun),
-        preceded(tag("type"), parse_type),
+        parse_comment,
+        preceded(tag("use"),  cut(parse_use)),
+        preceded(tag("fn"),   cut(parse_fun)),
+        preceded(tag("type"), cut(parse_type)),
+    ))(dat)
+}
+
+pub(crate) fn parse_comment(dat: ParseInput) -> ParseResult<Item> {
+    alt((
+        value(Item::Comment, pair(tag("//"), take_until("\n"))),
+        value(Item::Comment, delimited(tag("/*"), take_until("*/"), tag("*/"))),
     ))(dat)
 }
 
@@ -41,15 +49,33 @@ pub(crate) fn parse_use(dat: ParseInput) -> ParseResult<Item> {
 
 pub(crate) fn parse_fun(dat: ParseInput) -> ParseResult<Item> {
     map(
-        tuple((multispace0, cut(parse_ident), multispace0, cut(parse_block))),
-        |(_, name, _, block)| Item::Fun(Fun { name, signature: Vec::new(), block })
+        tuple((
+            preceded(multispace0, parse_ident),
+            preceded(multispace0, opt(parse_signature)),
+            preceded(multispace0, parse_block),
+        )),
+        |(name, signature, block)| Item::Fun(Fun { name, signature: signature.unwrap_or_default(), body: block })
     )(dat)
 }
 
 pub(crate) fn parse_type(dat: ParseInput) -> ParseResult<Item> {
     map(
-        tuple((multispace0, cut(parse_ident))),
-        |(_, _)| Item::Type(Type::Int)
+        tuple((
+            preceded(multispace0, cut(parse_ident)),
+        )),
+        |_| Item::Type(Type::Int)
+    )(dat)
+}
+
+pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Signature> {
+    map(
+        tuple((
+            preceded(multispace0, char(':')),
+            many0(preceded(multispace0, parse_ident)),
+            preceded(multispace0, opt(char('-'))),
+            many0(preceded(multispace0, parse_ident)),
+        )),
+        |(_, takes, _, returns)| Signature { takes, returns }
     )(dat)
 }
 
@@ -64,22 +90,34 @@ pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
 pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
     context("Op", alt((
         alt((
-            value(Op::Copy,   char('*')),
-            value(Op::Drop,   char('~')),
-            value(Op::Read,   char('>')),
-            value(Op::Write,  char('<')),
-            value(Op::Move,   char('~')),
-            value(Op::Addr,   char('&')),
-            value(Op::Type,   char('?')),
-            value(Op::Size,   char('!')),
-            value(Op::Access, char('.')),
+            value(Op::Copy,  char('*')),
+            value(Op::Over,  char('+')),
+            value(Op::Swap,  terminated(char('-'),   multispace1)), // could also be the start of an ident
+            value(Op::Rot3,  terminated(tag("rot3"), multispace1)),
+            value(Op::Rot4,  terminated(tag("rot4"), multispace1)),
+            value(Op::Drop,  char('~')),
+            value(Op::Read,  char('>')),
+            value(Op::Write, char('<')),
+            value(Op::Move,  char('~')),
+            value(Op::Addr,  char('&')),
+            value(Op::Type,  char('?')),
+            value(Op::Size,  char('!')),
+            value(Op::Dot,   char('.')),
         )),
         alt((
-            value(Op::Add,   tag("add")),
-            value(Op::Sub,   tag("sub")),
-            value(Op::Mul,   tag("mul")),
-            value(Op::Div,   tag("div")),
-            value(Op::Mod,   tag("mod")),
+            value(Op::Add, terminated(tag("add"), multispace1)),
+            value(Op::Sub, terminated(tag("sub"), multispace1)),
+            value(Op::Mul, terminated(tag("mul"), multispace1)),
+            value(Op::Dvm, terminated(tag("dvm"), multispace1)),
+            value(Op::Not, terminated(tag("not"), multispace1)),
+            value(Op::And, terminated(tag("and"), multispace1)),
+            value(Op::Or,  terminated(tag("or"),  multispace1)),
+            value(Op::Xor, terminated(tag("xor"), multispace1)),
+            value(Op::Eq,  terminated(tag("eq"),  multispace1)),
+            value(Op::Gt,  terminated(tag("gt"),  multispace1)),
+            value(Op::Gte, terminated(tag("gte"), multispace1)),
+            value(Op::Lt,  terminated(tag("lt"),  multispace1)),
+            value(Op::Lte, terminated(tag("lte"), multispace1)),
         )),
         alt((
             map(preceded(pair(tag("if"),   multispace0), cut(parse_block)), |block| Op::If   { block }),
@@ -99,7 +137,7 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
                 |integer| Op::Push { value: Literal::Int(integer) }
             ),
             map(parse_str_escaped, |string|  Op::Push { value: Literal::Str(string) }),
-            map(parse_ident,       |ident|   Op::Call { ident })
+            map(parse_ident,       |name|    Op::Call { name })
         )),
     )))(dat)
 }
@@ -167,19 +205,18 @@ pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
 }
 
 pub(crate) type ParseResult<'a, O> = IResult<ParseInput<'a>, O, ParseError<'a>>;
-pub(crate) type ParseInput<'a> = LocatedSpan<&'a str>; // todo convert to LocatedSpan<str> for use with convert_error
+pub(crate) type ParseInput<'a> = LocatedSpan<&'a str, usize>; // todo convert to LocatedSpan<str> for use with convert_error
 pub(crate) type ParseError<'a> = VerboseError<ParseInput<'a>>;
 
-pub(crate) fn format_parse_error(value: ParseError) -> diagnostic::Diag {
+pub(crate) fn format_error(value: ParseError) -> diagnostic::Diagnostic {
 
-    let mut diag = diagnostic::Diag::error("invalid source file");
+    let mut diag = diagnostic::Diagnostic::error("invalid source file");
 
     if let Some((span, _)) = value.errors.first() {
-        let code = std::str::from_utf8(span.get_line_beginning()).expect("Invalid Utf-8");
-        let (before, highlight, after) = split_at_byte_index(code, span.get_utf8_column() - 1);
+        let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
+        let (before, highlight, after) = split_at_char_index(code, span.get_utf8_column() - 1);
         diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
         diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column() });
-        diag.file = Some(String::from("input.rh"));
     }
 
     for (_, kind) in value.errors.iter() {
@@ -193,7 +230,7 @@ pub(crate) fn format_parse_error(value: ParseError) -> diagnostic::Diag {
 
 }
 
-fn split_at_byte_index(input: &str, index: usize) -> (&str, &str, &str) {
+fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
     let mut before = "";
     let mut target = "";
     let mut after  = "";
@@ -212,16 +249,18 @@ fn split_at_byte_index(input: &str, index: usize) -> (&str, &str, &str) {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ItemList {
-    pub uses: Vec<Use>,
+pub(crate) struct TranslationUnit<U> {
+    pub uses: U,
     pub funs: Vec<Fun>,
     pub types: Vec<Type>,
 }
 
+pub(crate) type ParseTranslationUnit = TranslationUnit<Vec<Use>>;
 pub(crate) type Block = Vec<Op>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Item {
+    Comment,
     Use(Use),
     Fun(Fun),
     Type(Type),
@@ -235,8 +274,14 @@ pub(crate) struct Use {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Fun {
     pub name: Span,
-    pub signature: Vec<Type>,
-    pub block: Block,
+    pub signature: Signature,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(crate) struct Signature {
+    pub takes: Vec<Span>,
+    pub returns: Vec<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -246,47 +291,69 @@ pub(crate) enum Type {
     Bool,
     Ptr { inner: Box<Type> },
     // fine-grained types
-    U8,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
+    // U8,
+    // U16,
+    // U32,
+    // U64,
+    // I8,
+    // I16,
+    // I32,
+    // I64,
     // type
-    Type,
+    // Type,
     // complex types
-    Array { inner: Box<Type>, length: u64 },
-    Tuple { inner: Vec<Type> },
+    // Array { inner: Box<Type>, length: u64 },
+    // Tuple { inner: Vec<Type> },
     // user types (newtype)
     // New { name: &'a str, size: u64 }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Op {
+
     Push { value: Literal },
-    Call { ident: Span },
-    Drop,
+
+    Call { name: Span },
+
     Copy,
+    Over,
+    Swap,
+    Rot3,
+    Rot4,
+    Drop,
+
     Read,
     Write,
     Move,
+
     Addr,
     Type,
     Size,
-    Access,
+    Dot,
+
     Add,
     Sub,
     Mul,
-    Div,
-    Mod,
+    Dvm,
+
+    Not,
+    And,
+    Or,
+    Xor,
+    Eq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+
     If   { block: Block },
     Elif { block: Block },
     Else { block: Block },
+
     Loop { block: Block },
-    Break,
     For  { block: Block },
+    Break,
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -296,21 +363,29 @@ pub(crate) enum Literal {
     Str(String), // owned String because we already processed escape sequences
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Span {
-    pub(crate) inner: ops::Range<usize>
+    pub(crate) id: usize,
+    pub(crate) start: u32,
+    pub(crate) end: u32,
 }
 
 impl Span {
+
     pub(crate) fn inside<'a>(&self, src: &'a str) -> &'a str {
-        &src[self.inner.clone()]
-        //              ^^^^^^ why the heck does Range not implement Copy
+        &src[self.start as usize .. self.end as usize]
     }
+
+    pub(crate) fn with(mut self, id: usize) -> Self {
+        self.id = id;
+        self
+    }
+
 }
 
 /// compute the index range for a given LocatedSpan
-fn to_span(value: LocatedSpan<&str>) -> Span {
+fn to_span(value: ParseInput) -> Span {
     let offset = value.location_offset();
-    Span { inner: offset..offset + value.len() }
+    Span { id: value.extra, start: offset as u32, end: (offset + value.len()) as u32 }
 }
 

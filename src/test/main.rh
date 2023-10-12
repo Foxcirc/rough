@@ -1,0 +1,17 @@
+
+// library pthread {
+//     fn create-thread: int int - int
+// }
+
+fn main {
+    1 2 add-intrinsic ~
+    loop {
+        1 1 eq if { break }
+    }
+    "hi"
+}
+
+fn add-intrinsic {
+    add
+}
+

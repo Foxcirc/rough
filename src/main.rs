@@ -2,24 +2,24 @@
 #[cfg(test)]
 pub(crate) mod test;
 
-pub mod diagnostic;
 pub mod parser;
-pub mod compiler;
+pub mod codegen;
+pub mod diagnostic;
 
-use std::{env, fs, collections::{HashSet, self, VecDeque}, hash::{self, Hasher}, path::PathBuf, time};
-use crate::diagnostic::Diag;
+use std::{env, time};
+use diagnostic::Diagnostic;
 
 fn main() {
     
     let opts = match cli::parse(env::args()) {
         Err(err) => {
             let diag = match err {
-                cli::CliError::ExpectedPath            => Diag::error("Expected Path"),
-                cli::CliError::ExpectedMode            => Diag::error("Expected Mode"),
-                cli::CliError::InvalidMode(other)      => Diag::error("Invalid Mode").note(&other),
-                cli::CliError::ExpectedVerbosity       => Diag::error("Expected Verbosity"),
-                cli::CliError::InvalidVerbosity(other) => Diag::error("Invalid Verbosity").note(&other),
-                cli::CliError::InvalidFlag(other)      => Diag::error("Invalid Flag").note(&other),
+                cli::CliError::ExpectedPath            => Diagnostic::error("Expected Path"),
+                cli::CliError::ExpectedMode            => Diagnostic::error("Expected Mode"),
+                cli::CliError::InvalidMode(other)      => Diagnostic::error("Invalid Mode").note(&other),
+                cli::CliError::ExpectedVerbosity       => Diagnostic::error("Expected Verbosity"),
+                cli::CliError::InvalidVerbosity(other) => Diagnostic::error("Invalid Verbosity").note(&other),
+                cli::CliError::InvalidFlag(other)      => Diagnostic::error("Invalid Flag").note(&other),
             };
             diag.emit();
             return
@@ -35,97 +35,170 @@ fn main() {
         Ok(opts) => opts,
     };
 
-    // start parsing and discovering the project's dependencies
-    // (non recursive version)
-    
-    let parsing_start_time = time::Instant::now();
-    
-    let mut results  = Vec::new();
-    let mut visited = HashSet::new();
-    let mut paths   = VecDeque::new();
+    // start discovering and parsing the project's dependencies
 
-    let (base, input) = match (opts.input.parent(), opts.input.file_name()) {
-        (Some(base), Some(input)) => (base, PathBuf::from(input)),
-        (..) => {
-            Diag::error("Invalid input path")
-                .code(&opts.input.to_string_lossy())
-                .emit();
+    let parsing_start_time = time::Instant::now();
+
+    let mut state = parse_modules::State::default();
+
+    match parse_modules::parse_modules(&mut state, opts.input.clone()) {
+        Ok(()) => (),
+        Err(diag) => {
+            diag.emit();
             return
         },
     };
 
-    paths.push_back(input);
-
-    while let Some(path) = paths.pop_front() {
-
-        if !visited.insert(path.clone()) { continue };
-
-        let human_name = match path.file_name() {
-            Some(val) => val.to_string_lossy().to_string(),
-            None => {
-                Diag::error("Invalid source-file path").emit();
-                return
-            }
-        };
-
-        let content_raw = match fs::read(base.join(&path)) {
-            Ok(val) => val,
-            Err(err) => {
-                Diag::error("Cannot read source-file")
-                    .code(human_name)
-                    .note(err)
-                    .emit();
-                return
-            }
-        };
-
-        let content = match String::from_utf8(content_raw) {
-            Ok(val) => val,
-            Err(err) => {
-                Diag::error("Source file contains invalid Utf-8")
-                    .code(human_name)
-                    .note(err)
-                    .emit();
-                return
-            }
-        };
-
-        let items = match parser::parse(&content) {
-            Ok(val) => val,
-            Err(err) => {
-                parser::format_parse_error(err).emit();
-                return
-            }
-        };
-
-        for item in items.uses.iter() {
-            paths.push_back(PathBuf::from(item.path.inside(&content)));
-        }
-
-        results.push(SourceFile { name: human_name, content, items });
-
-    }
+    let source_files = parse_modules::source_files(state);
 
     if opts.debug() {
-        let files: Vec<_> = results.iter().map(|item| &item.name[..]).collect();
-        Diag::debug("Parsing done")
-            .note(format!("Took: {:?}", time::Instant::now() - parsing_start_time))
-            .note(format!("In total {} files visited: {}", results.len(), files.join(", ")))
+        let files: Vec<_> = source_files.iter().map(|item| item.name()).collect();
+        let how_many = source_files.len();
+        let what = if source_files.len() == 1 { "file" } else { "files" };
+        Diagnostic::debug("parsing done")
+            .note(format!("took {:?}", time::Instant::now() - parsing_start_time))
+            .note(format!("{} {}: {}", how_many, what, files.join(", ")))
             .emit();
     }
 
-    // we now need to parse the files in reverse order
-    results.reverse();
+    // we now need to genrate code for the source files
 
+    let mut state = codegen::State::default();
 
+    for source_file in source_files.into_iter() {
+
+        match codegen::codegen(&mut state, source_file) {
+            Ok(()) => (),
+            Err(err) => {
+                if opts.debug() {
+                    Diagnostic::debug("failed codegen").emit();
+                }
+                for diag in codegen::format_error(err) {
+                    diag.emit();
+                }
+                return
+            }
+        };
+
+    }
+
+    let bytecode = match codegen::crossref(state) {
+        Ok(val) => val,
+        Err(err) => {
+            if opts.debug() {
+                Diagnostic::debug("failed crossref").emit();
+            }
+            for diag in codegen::format_error(err) {
+                diag.emit();
+            }
+            return
+        }
+    };
+
+    if opts.mode == cli::Mode::ShowIr {
+        Diagnostic::debug("showing intermediate representation").emit();
+        for (idx, instruction) in bytecode.into_iter().enumerate() {
+            eprintln!("{:3}: {:?}", idx, instruction);
+        }
+    }
 
 }
 
-#[derive(Debug)]
-struct SourceFile {
-    pub(crate) name: String,
-    pub(crate) content: String,
-    pub(crate) items: parser::ItemList
+pub(crate) mod parse_modules {
+
+    use std::{path::{PathBuf, Path}, ffi::OsStr, fs, collections::{HashSet, HashMap, VecDeque}};
+    use crate::{parser::{self, TranslationUnit}, diagnostic::Diagnostic};
+
+    pub(crate) fn parse_modules(state: &mut State, path: PathBuf) -> Result<(), Diagnostic> {
+
+        if !state.visited.insert(path.clone()) { // todo: clone?
+
+            let idx = state.source_files.iter()
+                .position(|item: &SourceFile| &item.path == &path)
+                .expect("visited path not found");
+
+            // move this entry to the last position
+            let item = state.source_files.remove(idx).expect("invalid index");
+            state.source_files.push_front(item);
+
+            return Ok(())
+
+        };
+
+        let (base, file_name) = split_file_name(&path)?;
+
+        let content = match fs::read_to_string(&path) {
+            Ok(val) => val,
+            Err(err) => return Err(Diagnostic::error("cannot read file").note(err.to_string()).file(file_name))
+        };
+
+        let items = match parser::parse(&content, state.visited.len()) { // todo: is span_id needed?
+            Ok(val) => val,
+            Err(err) => return Err(parser::format_error(err).file(file_name)),
+        };
+
+        let mut module_map = HashMap::new();
+
+        for item in items.uses {
+
+            let module_name = item.path.inside(&content);
+            let module_path = base.join(module_name);
+            module_map.insert(item, module_path.clone());
+
+            parse_modules(state, module_path)?;
+
+        }
+
+        state.source_files.push_back(SourceFile {
+            path,
+            content,
+            items: ModuleTranslationUnit {
+                uses: module_map,
+                funs: items.funs,
+                types: items.types,
+            }
+        });
+
+        Ok(())
+
+    }
+
+    fn split_file_name(path: &Path) -> Result<(&Path, &str), Diagnostic> {
+        Ok((
+            path.parent().ok_or(Diagnostic::error("invalid file"))?,
+            path.file_name().ok_or(Diagnostic::error("invalid file"))
+                .and_then(|name| name.to_str().ok_or(Diagnostic::error("non-utf8 file name")))?
+        ))
+    }
+
+    pub(crate) fn source_files(state: State) -> Vec<SourceFile> {
+        state.source_files.into()
+    }
+
+    #[derive(Default)]
+    pub(crate) struct State {
+        pub(crate) visited: HashSet<PathBuf>,
+        pub(crate) source_files: VecDeque<SourceFile>,
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct SourceFile {
+        pub(crate) path: PathBuf,
+        pub(crate) content: String,
+        pub(crate) items: ModuleTranslationUnit
+    }
+
+    pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>;
+
+    impl SourceFile {
+        pub(crate) fn name(&self) -> &str {
+            self.path.file_name()
+                .unwrap_or(&OsStr::new("unknown"))
+                .to_str()
+                .expect("file name not valid utf8")
+        }
+    }
+
 }
 
 mod cli {
@@ -241,7 +314,7 @@ Written by Foxcirc.
         Debug,
     }
 
-    #[derive(Default)]
+    #[derive(Default, PartialEq, Eq)]
     pub(crate) enum Mode {
         Build,
         #[default]

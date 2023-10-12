@@ -3,11 +3,11 @@ Symbols:
 
 > ptr-read
 < ptr-write
-
-+ ???
+- swap
++ over
 * copy
 ~ drop
-/ ???
+/ comment
 # attribute
 $ ???
 % ???
@@ -33,4 +33,5 @@ for
 loop
 break
 ret
+move
 

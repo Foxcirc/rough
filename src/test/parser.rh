@@ -1,6 +1,4 @@
 
-use "std/thread.rh"
-
 type Box
 
 fn main {
