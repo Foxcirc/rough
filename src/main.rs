@@ -82,18 +82,20 @@ fn main() {
 
     }
 
-    let bytecode = match codegen::crossref(state) {
-        Ok(val) => val,
-        Err(err) => {
-            if opts.debug() {
-                Diagnostic::debug("failed crossref").emit();
-            }
-            for diag in codegen::format_error(err) {
-                diag.emit();
-            }
-            return
-        }
-    };
+    // let bytecode = match codegen::crossref(state) {
+    //     Ok(val) => val,
+    //     Err(err) => {
+    //         if opts.debug() {
+    //             Diagnostic::debug("failed crossref").emit();
+    //         }
+    //         for diag in codegen::format_error(err) {
+    //             diag.emit();
+    //         }
+    //         return
+    //     }
+    // };
+
+    let bytecode = state.bytecode;
 
     if opts.mode == cli::Mode::ShowIr {
         Diagnostic::debug("showing intermediate representation").emit();

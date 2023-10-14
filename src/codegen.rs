@@ -1,26 +1,21 @@
 
 
-use std::collections::HashMap;
-
-use crate::{parser::{Literal, Op, IdentStr}, diagnostic::Diagnostic, parse_modules};
+use std::{collections::HashMap, fmt};
+use crate::{parser::{Literal, Op}, diagnostic::Diagnostic, parse_modules};
 
 pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
-    let current_span_id = state.content.len();
     let errors = Vec::new();
 
     for fun in source_file.items.funs {
 
-        state.bytecode.push(Instruction::comment(format!("fn {}", &fun.name)));
-        state.funs.insert(fun.name, state.bytecode.len()); // the fun starts here
+        state.bytecode.push(Instruction::FnLabel { label: Label::new(fun.name) });
 
-        codegen_block(&mut state.bytecode, fun.body, None, current_span_id);
+        codegen_block(state, fun.body, None);
 
         state.bytecode.push(Instruction::Return);
 
     }
-
-    state.content.push(source_file.content);
 
     if errors.is_empty() {
         Ok(())
@@ -30,23 +25,23 @@ pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile)
 
 }
 
-fn codegen_block(dest: &mut Vec<Instruction<IdentStr>>, block: Vec<Op>, loop_escape: Option<usize>, current_span_id: usize) {
+fn codegen_block(state: &mut State, block: Vec<Op>, loop_escape: Option<BrLabel>) {
 
     for op in block {
 
         match op {
-            Op::Push { value } => dest.push(Instruction::Push { value }),
-            Op::Call { name }  => dest.push(Instruction::Call { what: name }), // todo: make span only have an id after this (two different span types, so you cant forget calling with)
+            Op::Push { value } => state.bytecode.push(Instruction::Push { value }),
+            Op::Call { name }  => state.bytecode.push(Instruction::Call { to: Label::new(name) }),
 
-            Op::Copy  => dest.push(Instruction::Copy),
-            Op::Over  => dest.push(Instruction::Over),
-            Op::Swap  => dest.push(Instruction::Swap),
-            Op::Rot3  => dest.push(Instruction::Rot3),
-            Op::Rot4  => dest.push(Instruction::Rot3),
-            Op::Drop  => dest.push(Instruction::Drop),
+            Op::Copy  => state.bytecode.push(Instruction::Copy),
+            Op::Over  => state.bytecode.push(Instruction::Over),
+            Op::Swap  => state.bytecode.push(Instruction::Swap),
+            Op::Rot3  => state.bytecode.push(Instruction::Rot3),
+            Op::Rot4  => state.bytecode.push(Instruction::Rot4),
+            Op::Drop  => state.bytecode.push(Instruction::Drop),
 
-            Op::Read  => dest.push(Instruction::Read),
-            Op::Write => dest.push(Instruction::Write),
+            Op::Read  => state.bytecode.push(Instruction::Read),
+            Op::Write => state.bytecode.push(Instruction::Write),
 
             Op::Move  => todo!(),
             Op::Addr  => todo!(),
@@ -54,71 +49,56 @@ fn codegen_block(dest: &mut Vec<Instruction<IdentStr>>, block: Vec<Op>, loop_esc
             Op::Size  => todo!(),
             Op::Dot   => todo!(),
 
-            Op::Add => dest.push(Instruction::Add),
-            Op::Sub => dest.push(Instruction::Sub),
-            Op::Mul => dest.push(Instruction::Mul),
-            Op::Dvm => dest.push(Instruction::Dvm),
+            Op::Add => state.bytecode.push(Instruction::Add),
+            Op::Sub => state.bytecode.push(Instruction::Sub),
+            Op::Mul => state.bytecode.push(Instruction::Mul),
+            Op::Dvm => state.bytecode.push(Instruction::Dvm),
 
-            Op::Not => dest.push(Instruction::Not),
-            Op::And => dest.push(Instruction::And),
-            Op::Or  => dest.push(Instruction::Or),
-            Op::Xor => dest.push(Instruction::Xor),
+            Op::Not => state.bytecode.push(Instruction::Not),
+            Op::And => state.bytecode.push(Instruction::And),
+            Op::Or  => state.bytecode.push(Instruction::Or),
+            Op::Xor => state.bytecode.push(Instruction::Xor),
 
-            Op::Eq  => dest.push(Instruction::Eq),
-            Op::Gt  => dest.push(Instruction::Gt),
-            Op::Gte => dest.push(Instruction::Gte),
-            Op::Lt  => dest.push(Instruction::Lt),
-            Op::Lte => dest.push(Instruction::Lte),
+            Op::Eq  => state.bytecode.push(Instruction::Eq),
+            Op::Gt  => state.bytecode.push(Instruction::Gt),
+            Op::Gte => state.bytecode.push(Instruction::Gte),
+            Op::Lt  => state.bytecode.push(Instruction::Lt),
+            Op::Lte => state.bytecode.push(Instruction::Lte),
 
             Op::If { block } => {
 
-                let start = dest.len();
-                dest.push(Instruction::Placeholder);
-                codegen_block(dest, block, loop_escape, current_span_id);
-                // this is for a potential `else` block to use
-                dest.push(Instruction::IfBlank);
-                let end = dest.len();
-
-                // jump after the `if`
-                dest[start] = Instruction::Bne { to: end };
+                let end = state.next_label();
+                state.bytecode.push(Instruction::Bne { to: end });
+                codegen_block(state, block, loop_escape);
+                state.bytecode.push(Instruction::BrLabel { label: end });
 
             },
             Op::Elif { block: _block } => todo!(),
             Op::Else { block } => {
 
                 // check that this `else` is coming directly after an `if`
-                assert!(matches!(dest.last(), Some(Instruction::IfBlank)), "todo: not after if");
+                assert!(matches!(state.bytecode.last(), Some(Instruction::BrLabel { .. })), "todo: not after if"); // todo: harden check
 
-                let start = dest.len() - 1;
-                codegen_block(dest, block, loop_escape, current_span_id);
-                let end = dest.len();
-
-                // skip the `else` body
-                dest[start] = Instruction::Bra { to: end }
+                let end = state.next_label();
+                state.bytecode.insert(state.bytecode.len() - 2, Instruction::Bra { to: end });
+                codegen_block(state, block, loop_escape);
+                state.bytecode.push(Instruction::BrLabel { label: end });
 
             },
             Op::Loop { block } => {
 
-                let escape = dest.len() - 1;
-                let start = dest.len();
-                codegen_block(dest, block, Some(escape), current_span_id);
-                // jump back to the `loop` beginning
-                dest.push(Instruction::Bra { to: start });
-                let end = dest.len();
-
-                // patch up the `break` bra instructions
-                for item in dest[start..end].iter_mut() {
-                    if matches!(item, Instruction::Bra { to } if *to == escape) {
-                        *item = Instruction::Bra { to: end };
-                    }
-                }
+                let start = state.next_label();
+                let escape = state.next_label();
+                state.bytecode.push(Instruction::BrLabel { label: start });
+                codegen_block(state, block, Some(escape));
+                state.bytecode.push(Instruction::Bra { to: start });
 
             },
             Op::For  { block: _block } => todo!(),
             Op::Break => {
 
-                let idx = loop_escape.expect("todo: not in a loop");
-                dest.push(Instruction::Bra { to: idx })
+                let escape = loop_escape.expect("todo: not in a loop");
+                state.bytecode.push(Instruction::Bra { to: escape })
 
             },
         };
@@ -127,85 +107,15 @@ fn codegen_block(dest: &mut Vec<Instruction<IdentStr>>, block: Vec<Op>, loop_esc
 
 }
 
-pub(crate) fn crossref(state: State) -> Result<Bytecode<Position>, CodegenError> {
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Instruction {
 
-    let mut errors = Vec::new();
-    let mut bytecode = Bytecode::new();
-
-    for instruction in state.bytecode {
-
-        let result = match instruction {
-
-            Instruction::Placeholder => todo!("Placeholder instruction during crossref"),
-
-            Instruction::Push { value } => Instruction::Push { value },
-            
-            Instruction::Call { what }  => {
-                if let Some(pos) = state.funs.get(&what) {
-                    Instruction::Call { what: *pos }
-                } else {
-                    errors.push(CodegenErrorKind::UnknownFn { name: what });
-                    continue
-                }
-            },
-
-            Instruction::Return => Instruction::Return,
-
-            Instruction::Drop => Instruction::Drop,
-            Instruction::Copy => Instruction::Copy,
-            Instruction::Over => Instruction::Over,
-            Instruction::Swap => Instruction::Swap,
-            Instruction::Rot3 => Instruction::Rot3,
-            Instruction::Rot4 => Instruction::Rot4,
-
-            Instruction::Read  => Instruction::Read,
-            Instruction::Write => Instruction::Write,
-
-            Instruction::Add => Instruction::Add,
-            Instruction::Sub => Instruction::Sub,
-            Instruction::Mul => Instruction::Mul,
-            Instruction::Dvm => Instruction::Dvm,
-
-            Instruction::Not => Instruction::Not,
-            Instruction::And => Instruction::And,
-            Instruction::Or  => Instruction::Or,
-            Instruction::Xor => Instruction::Xor,
-            Instruction::Eq  => Instruction::Eq,
-            Instruction::Gt  => Instruction::Gt,
-            Instruction::Gte => Instruction::Gte,
-            Instruction::Lt  => Instruction::Lt,
-            Instruction::Lte => Instruction::Lte,
-
-            Instruction::Bne { to } => Instruction::Bne { to },
-            Instruction::Bra { to } => Instruction::Bra { to },
-
-            Instruction::IfBlank => Instruction::IfBlank,
-
-            Instruction::Comment { text } => Instruction::Comment { text },
-
-        };
-
-        bytecode.push(result);
-
-    }
-
-    if errors.is_empty() {
-        Ok(bytecode)
-    } else {
-        Err(CodegenError { errors })
-    }
-
-}
-
-#[derive(Debug)]
-pub(crate) enum Instruction<P> {
-
-    Comment { text: String },
-    Placeholder,
+    FnLabel { label: FnLabel },
+    BrLabel { label: BrLabel },
 
     Push { value: Literal },
 
-    Call { what: P },
+    Call { to: FnLabel },
     Return,
 
     Drop,
@@ -241,28 +151,43 @@ pub(crate) enum Instruction<P> {
     Lt,
     Lte,
 
-    Bne { to: usize },
-    Bra { to: usize },
-
-    IfBlank,
+    Bne { to: BrLabel },
+    Bra { to: BrLabel },
 
 }
 
-impl<P> Instruction<P> {
-    pub(crate) fn comment<S: ToString>(value: S) -> Self {
-        Self::Comment { text: value.to_string() }
+#[derive(Clone, Copy, PartialEq, Eq)] // todo: remove eq?
+pub(crate) struct Label<T> {
+    inner: T,
+}
+
+impl<T> Label<T> {
+    fn new(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
+type FnLabel = Label<String>;
+type BrLabel = Label<usize>;
+
+impl<T: fmt::Debug> fmt::Debug for Label<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Label({:?})", self.inner)
     }
 }
 
 #[derive(Default)]
 pub(crate) struct State {
-    pub(crate) content: Vec<String>, // every Span has an id that corresponds to an index into this list
-    pub(crate) funs: HashMap<String, Position>,
-    pub(crate) bytecode: Bytecode<IdentStr>,
+    pub(crate) counter: usize,
+    pub(crate) bytecode: Vec<Instruction>,
 }
 
-pub(crate) type Bytecode<P> = Vec<Instruction<P>>;
-pub(crate) type Position = usize;
+impl State {
+    fn next_label(&mut self) -> BrLabel {
+        self.counter += 1;
+        Label::new(self.counter)
+    }
+}
 
 pub(crate) struct CodegenError {
     pub(crate) errors: Vec<CodegenErrorKind>,
