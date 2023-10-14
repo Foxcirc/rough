@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{parser::{Span, Literal, Op}, diagnostic::Diagnostic, parse_modules};
+use crate::{parser::{Literal, Op, IdentStr}, diagnostic::Diagnostic, parse_modules};
 
 pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
@@ -11,9 +11,8 @@ pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile)
 
     for fun in source_file.items.funs {
 
-        state.funs.insert(fun.name.inside(&source_file.content).to_string(), state.bytecode.len()); // fun starts at current position
-
-        state.bytecode.push(Instruction::comment(format!("fn {}", fun.name.inside(&source_file.content))));
+        state.bytecode.push(Instruction::comment(format!("fn {}", &fun.name)));
+        state.funs.insert(fun.name, state.bytecode.len()); // the fun starts here
 
         codegen_block(&mut state.bytecode, fun.body, None, current_span_id);
 
@@ -31,13 +30,13 @@ pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile)
 
 }
 
-fn codegen_block(dest: &mut Vec<Instruction<Span>>, block: Vec<Op>, loop_escape: Option<usize>, current_span_id: usize) {
+fn codegen_block(dest: &mut Vec<Instruction<IdentStr>>, block: Vec<Op>, loop_escape: Option<usize>, current_span_id: usize) {
 
     for op in block {
 
         match op {
             Op::Push { value } => dest.push(Instruction::Push { value }),
-            Op::Call { name }  => dest.push(Instruction::Call { what: name.with(current_span_id) }), // todo: make span only have an id after this (two different span types, so you cant forget calling with)
+            Op::Call { name }  => dest.push(Instruction::Call { what: name }), // todo: make span only have an id after this (two different span types, so you cant forget calling with)
 
             Op::Copy  => dest.push(Instruction::Copy),
             Op::Over  => dest.push(Instruction::Over),
@@ -142,11 +141,10 @@ pub(crate) fn crossref(state: State) -> Result<Bytecode<Position>, CodegenError>
             Instruction::Push { value } => Instruction::Push { value },
             
             Instruction::Call { what }  => {
-                let name = what.inside(&state.content[what.id]);
-                if let Some(pos) = state.funs.get(name) {
+                if let Some(pos) = state.funs.get(&what) {
                     Instruction::Call { what: *pos }
                 } else {
-                    errors.push(CodegenErrorKind::UnknownFn { name: name.to_string() });
+                    errors.push(CodegenErrorKind::UnknownFn { name: what });
                     continue
                 }
             },
@@ -260,7 +258,7 @@ impl<P> Instruction<P> {
 pub(crate) struct State {
     pub(crate) content: Vec<String>, // every Span has an id that corresponds to an index into this list
     pub(crate) funs: HashMap<String, Position>,
-    pub(crate) bytecode: Bytecode<Span>,
+    pub(crate) bytecode: Bytecode<IdentStr>,
 }
 
 pub(crate) type Bytecode<P> = Vec<Instruction<P>>;

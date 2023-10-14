@@ -170,20 +170,20 @@ pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
     result
 }
 
-pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<Span> {
+pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<IdentStr> {
     map(
         context("identifier cannot be a keyword", verify(
             context("expected identifier", recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))),
             |ident: &ParseInput| !matches!(ident.into_fragment(), "fn" | "type" | "if" | "elif" | "else" | "loop" | "for" | "break" | "true" | "false")
         )),
-        to_span
+        to_identstr
     )(dat)
 }
 
-pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<Span> {
+pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<IdentStr> {
     context("expected string literal", map(
         delimited(char('\"'), is_not("\""), char('\"')),
-        to_span
+        to_identstr
     ),
     )(dat)
 }
@@ -268,20 +268,20 @@ pub(crate) enum Item {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Use {
-    pub path: Span,
+    pub path: IdentStr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Fun {
-    pub name: Span,
+    pub name: IdentStr,
     pub signature: Signature,
     pub body: Block,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Signature {
-    pub takes: Vec<Span>,
-    pub returns: Vec<Span>,
+    pub takes: Vec<IdentStr>,
+    pub returns: Vec<IdentStr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -313,7 +313,7 @@ pub(crate) enum Op {
 
     Push { value: Literal },
 
-    Call { name: Span },
+    Call { name: IdentStr },
 
     Copy,
     Over,
@@ -363,29 +363,37 @@ pub(crate) enum Literal {
     Str(String), // owned String because we already processed escape sequences
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Span {
-    pub(crate) id: usize,
-    pub(crate) start: u32,
-    pub(crate) end: u32,
+pub(crate) type IdentStr = String;
+
+fn to_identstr(value: ParseInput) -> String {
+    value.fragment().to_string()
 }
 
-impl Span {
+// todo: store everything more efficiently (Arena, Pinned Buffer?) (bumpalo, id_arena?)
 
-    pub(crate) fn inside<'a>(&self, src: &'a str) -> &'a str {
-        &src[self.start as usize .. self.end as usize]
-    }
-
-    pub(crate) fn with(mut self, id: usize) -> Self {
-        self.id = id;
-        self
-    }
-
-}
-
-/// compute the index range for a given LocatedSpan
-fn to_span(value: ParseInput) -> Span {
-    let offset = value.location_offset();
-    Span { id: value.extra, start: offset as u32, end: (offset + value.len()) as u32 }
-}
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// pub(crate) struct Span {
+//     pub(crate) id: usize,
+//     pub(crate) start: u32,
+//     pub(crate) end: u32,
+// }
+// 
+// impl Span {
+// 
+//     pub(crate) fn inside<'a>(&self, src: &'a str) -> &'a str {
+//         &src[self.start as usize .. self.end as usize]
+//     }
+// 
+//     pub(crate) fn with(mut self, id: usize) -> Self {
+//         self.id = id;
+//         self
+//     }
+// 
+// }
+// 
+// /// compute the index range for a given LocatedSpan
+// fn to_span(value: ParseInput) -> Span {
+//     let offset = value.location_offset();
+//     Span { id: value.extra, start: offset as u32, end: (offset + value.len()) as u32 }
+// }
 

@@ -9,6 +9,7 @@ fn main {
         1 1 eq if { break }
     }
     "hi"
+
 }
 
 fn add-intrinsic {

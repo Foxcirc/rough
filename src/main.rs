@@ -141,7 +141,7 @@ pub(crate) mod parse_modules {
 
         for item in items.uses {
 
-            let module_name = item.path.inside(&content);
+            let module_name = &item.path;
             let module_path = base.join(module_name);
             module_map.insert(item, module_path.clone());
 
