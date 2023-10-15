@@ -286,11 +286,14 @@ pub(crate) struct Signature {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
+    // special Any type used for typechecking
+    Any,
     // standard types
     Int,
     Bool,
-    Ptr { inner: Box<Type> },
-    // fine-grained types
+    Char,
+    Ptr { inner: Box<Type> }, // todo: add slice type
+    // fine-grained integer types
     // U8,
     // U16,
     // U32,
@@ -361,6 +364,14 @@ pub(crate) enum Literal {
     Int(u64),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
+}
+
+pub(crate) fn literal_type(literal: &Literal) -> Type {
+    match literal {
+        Literal::Int(..)  => Type::Int,
+        Literal::Bool(..) => Type::Bool,
+        Literal::Str(..)  => Type::Ptr { inner: Box::new(Type::Char) }
+    }
 }
 
 pub(crate) type IdentStr = String;

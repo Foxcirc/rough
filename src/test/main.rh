@@ -4,12 +4,14 @@
 // }
 
 fn main {
-    1 2 add-intrinsic ~
-    loop {
-        1 1 eq if { break }
+    1 2 add
+    3 eq if {
+        1
+    } else {
+        2
     }
-    "hi"
-
+    else {}
+    ~
 }
 
 fn add-intrinsic {

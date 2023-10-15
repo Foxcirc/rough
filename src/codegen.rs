@@ -1,9 +1,9 @@
 
 
-use std::{collections::HashMap, fmt};
-use crate::{parser::{Literal, Op}, diagnostic::Diagnostic, parse_modules};
+use std::fmt;
+use crate::{parser::{Literal, Op}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
 
-pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
+pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
     let errors = Vec::new();
 
@@ -25,13 +25,22 @@ pub(crate) fn codegen(state: &mut State, source_file: parse_modules::SourceFile)
 
 }
 
-fn codegen_block(state: &mut State, block: Vec<Op>, loop_escape: Option<BrLabel>) {
+fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape: Option<BrLabel>) {
 
     for op in block {
 
         match op {
+
             Op::Push { value } => state.bytecode.push(Instruction::Push { value }),
-            Op::Call { name }  => state.bytecode.push(Instruction::Call { to: Label::new(name) }),
+
+            Op::Call { name }  => {
+                let inrinsic = I::generate(&name);
+                let result = match inrinsic {
+                    Some(val) => Instruction::Intrinsic(val),
+                    None => Instruction::Call { to: Label::new(name) }
+                };
+                state.bytecode.push(result);
+            },
 
             Op::Copy  => state.bytecode.push(Instruction::Copy),
             Op::Over  => state.bytecode.push(Instruction::Over),
@@ -80,7 +89,7 @@ fn codegen_block(state: &mut State, block: Vec<Op>, loop_escape: Option<BrLabel>
                 assert!(matches!(state.bytecode.last(), Some(Instruction::BrLabel { .. })), "todo: not after if"); // todo: harden check
 
                 let end = state.next_label();
-                state.bytecode.insert(state.bytecode.len() - 2, Instruction::Bra { to: end });
+                state.bytecode.insert(state.bytecode.len() - 1, Instruction::Bra { to: end });
                 codegen_block(state, block, loop_escape);
                 state.bytecode.push(Instruction::BrLabel { label: end });
 
@@ -108,7 +117,7 @@ fn codegen_block(state: &mut State, block: Vec<Op>, loop_escape: Option<BrLabel>
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Instruction {
+pub(crate) enum Instruction<I> {
 
     FnLabel { label: FnLabel },
     BrLabel { label: BrLabel },
@@ -151,24 +160,26 @@ pub(crate) enum Instruction {
     Lt,
     Lte,
 
-    Bne { to: BrLabel },
+    Bne { to: BrLabel }, // todo: make it all tuple variants
     Bra { to: BrLabel },
+
+    Intrinsic(I),
 
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)] // todo: remove eq?
 pub(crate) struct Label<T> {
-    inner: T,
+    pub(crate) inner: T,
 }
 
 impl<T> Label<T> {
-    fn new(inner: T) -> Self {
+    pub(crate) fn new(inner: T) -> Self {
         Self { inner }
     }
 }
 
-type FnLabel = Label<String>;
-type BrLabel = Label<usize>;
+pub(crate) type FnLabel = Label<String>;
+pub(crate) type BrLabel = Label<usize>;
 
 impl<T: fmt::Debug> fmt::Debug for Label<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -176,13 +187,21 @@ impl<T: fmt::Debug> fmt::Debug for Label<T> {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct State {
+pub(crate) struct State<I> {
     pub(crate) counter: usize,
-    pub(crate) bytecode: Vec<Instruction>,
+    pub(crate) bytecode: Vec<Instruction<I>>,
 }
 
-impl State {
+impl<I> Default for State<I> {
+    fn default() -> Self {
+        Self {
+            counter: 0,
+            bytecode: Vec::with_capacity(128),
+        }
+    }
+}
+
+impl<I> State<I> {
     fn next_label(&mut self) -> BrLabel {
         self.counter += 1;
         Label::new(self.counter)

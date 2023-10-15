@@ -4,6 +4,7 @@ pub(crate) mod test;
 
 pub mod parser;
 pub mod codegen;
+pub mod typecheck;
 pub mod diagnostic;
 
 use std::{env, time};
@@ -63,7 +64,7 @@ fn main() {
 
     // we now need to genrate code for the source files
 
-    let mut state = codegen::State::default();
+    let mut state = codegen::State::<arch::Intel64>::default();
 
     for source_file in source_files.into_iter() {
 
@@ -82,25 +83,63 @@ fn main() {
 
     }
 
-    // let bytecode = match codegen::crossref(state) {
-    //     Ok(val) => val,
-    //     Err(err) => {
-    //         if opts.debug() {
-    //             Diagnostic::debug("failed crossref").emit();
-    //         }
-    //         for diag in codegen::format_error(err) {
-    //             diag.emit();
-    //         }
-    //         return
-    //     }
-    // };
-
     let bytecode = state.bytecode;
 
     if opts.mode == cli::Mode::ShowIr {
         Diagnostic::debug("showing intermediate representation").emit();
-        for (idx, instruction) in bytecode.into_iter().enumerate() {
+        for (idx, instruction) in bytecode.iter().enumerate() {
             eprintln!("{:3}: {:?}", idx, instruction);
+        }
+    }
+
+    match typecheck::typecheck(bytecode) {
+        Ok(()) => (),
+        Err(err) => {
+            typecheck::format_error(err).emit();
+            return;
+        }
+    };
+
+}
+
+pub(crate) mod arch {
+
+    use crate::parser::Type;
+
+    pub(crate) trait Intrinsic: PartialEq + Eq {
+        fn generate(name: &str) -> Option<Self> where Self: Sized;
+        fn signature(&self) -> &[&[Type]; 2];
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) enum Intel64 {
+        Syscall1,
+        Syscall2,
+        Syscall3,
+        Syscall4,
+        Syscall5,
+    }
+
+    impl Intrinsic for Intel64 {
+        fn generate(name: &str) -> Option<Self> {
+            match name {
+                "syscall-1" => Some(Self::Syscall1),
+                "syscall-2" => Some(Self::Syscall2),
+                "syscall-3" => Some(Self::Syscall3),
+                "syscall-4" => Some(Self::Syscall4),
+                "syscall-5" => Some(Self::Syscall5),
+                _other => None,
+            }
+        }
+        fn signature(&self) -> &[&[Type]; 2] {
+            const INT: Type = Type::Int;
+            match self {
+                Self::Syscall1 => &[&[INT; 1], &[INT]],
+                Self::Syscall2 => &[&[INT; 2], &[INT]],
+                Self::Syscall3 => &[&[INT; 3], &[INT]],
+                Self::Syscall4 => &[&[INT; 4], &[INT]],
+                Self::Syscall5 => &[&[INT; 5], &[INT]],
+            }
         }
     }
 
