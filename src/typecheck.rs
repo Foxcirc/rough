@@ -1,7 +1,7 @@
 
 use std::{convert::identity, iter};
 
-use crate::{codegen::{Instruction, BrLabel, FnLabel}, parser::{Type, literal_type}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{Instruction, BrLabel, FnLabel, Producer}, parser::{Type, literal_type}, arch::Intrinsic, diagnostic::Diagnostic};
 
 pub(crate) fn typecheck<I: Intrinsic>(bytecode: Vec<Instruction<I>>) -> Result<(), TypeError> {
 
@@ -211,8 +211,8 @@ fn eval_fn<I: Intrinsic>(bytecode: &Vec<Instruction<I>>, stack: &mut Vec<Type>, 
                     // `if/else` block
                     let mut if_stack = stack.clone();
                     let mut else_stack = stack.clone();
-                    eval_fn(bytecode, &mut if_stack, ip + 1, Instruction::BrLabel { label: *to })?;
-                    eval_fn(bytecode, &mut else_stack, position, Instruction::BrLabel { label: *else_to })?;
+                    eval_fn(bytecode, &mut if_stack, ip + 1, Instruction::BrLabel { label: *to, producer: Producer::If })?;
+                    eval_fn(bytecode, &mut else_stack, position, Instruction::BrLabel { label: *else_to, producer: Producer::Else })?;
                     if if_stack != else_stack {
                         return Err(TypeError::BranchesNotEqual);
                     }
@@ -222,7 +222,7 @@ fn eval_fn<I: Intrinsic>(bytecode: &Vec<Instruction<I>>, stack: &mut Vec<Type>, 
                 } else {
                     // `if` block
                     let mut if_stack = stack.clone();
-                    eval_fn(bytecode, &mut if_stack, ip + 1, Instruction::BrLabel { label: *to })?;
+                    eval_fn(bytecode, &mut if_stack, ip + 1, Instruction::BrLabel { label: *to, producer: Producer::If })?;
                     if stack != &mut if_stack {
                         return Err(TypeError::BranchesNotEmpty);
                     }
@@ -282,7 +282,7 @@ fn find_fn_label<I: Intrinsic>(bytecode: &Vec<Instruction<I>>, target: &FnLabel)
 
 fn find_br_label<I: Intrinsic>(bytecode: &Vec<Instruction<I>>, target: &BrLabel) -> Option<usize> {
     bytecode.iter().position(|item| {
-        if let Instruction::BrLabel { label } = item {
+        if let Instruction::BrLabel { label, .. } = item {
             label == target
         } else {
             false

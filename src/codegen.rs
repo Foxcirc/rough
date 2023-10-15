@@ -5,27 +5,17 @@ use crate::{parser::{Literal, Op}, diagnostic::Diagnostic, parse_modules, arch::
 
 pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
-    let errors = Vec::new();
-
     for fun in source_file.items.funs {
-
         state.bytecode.push(Instruction::FnLabel { label: Label::new(fun.name) });
-
-        codegen_block(state, fun.body, None);
-
+        codegen_block(state, fun.body, None)?;
         state.bytecode.push(Instruction::Return);
-
     }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(CodegenError { errors })
-    }
+    Ok(())
 
 }
 
-fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape: Option<BrLabel>) {
+fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape: Option<BrLabel>) -> Result<(), CodegenError> {
 
     for op in block {
 
@@ -78,41 +68,48 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 
                 let end = state.next_label();
                 state.bytecode.push(Instruction::Bne { to: end });
-                codegen_block(state, block, loop_escape);
-                state.bytecode.push(Instruction::BrLabel { label: end });
+                codegen_block(state, block, loop_escape)?;
+                state.bytecode.push(Instruction::BrLabel { label: end, producer: Producer::If });
 
             },
             Op::Elif { block: _block } => todo!(),
             Op::Else { block } => {
 
                 // check that this `else` is coming directly after an `if`
-                assert!(matches!(state.bytecode.last(), Some(Instruction::BrLabel { .. })), "todo: not after if"); // todo: harden check
+                if !matches!(state.bytecode.last(), Some(Instruction::BrLabel { producer: Producer::If, .. })) {
+                    return Err(CodegenError::InvalidElse)
+                }
 
                 let end = state.next_label();
                 state.bytecode.insert(state.bytecode.len() - 1, Instruction::Bra { to: end });
-                codegen_block(state, block, loop_escape);
-                state.bytecode.push(Instruction::BrLabel { label: end });
+                codegen_block(state, block, loop_escape)?;
+                state.bytecode.push(Instruction::BrLabel { label: end, producer: Producer::Else });
 
             },
             Op::Loop { block } => {
 
                 let start = state.next_label();
                 let escape = state.next_label();
-                state.bytecode.push(Instruction::BrLabel { label: start });
-                codegen_block(state, block, Some(escape));
+                state.bytecode.push(Instruction::BrLabel { label: start, producer: Producer::Loop });
+                codegen_block(state, block, Some(escape))?;
                 state.bytecode.push(Instruction::Bra { to: start });
 
             },
             Op::For  { block: _block } => todo!(),
             Op::Break => {
 
-                let escape = loop_escape.expect("todo: not in a loop");
+                let escape = match loop_escape {
+                    Some(val) => val,
+                    None => return Err(CodegenError::InvalidBreak),
+                };
                 state.bytecode.push(Instruction::Bra { to: escape })
 
             },
         };
 
-    }
+    };
+
+    Ok(())
 
 }
 
@@ -120,7 +117,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 pub(crate) enum Instruction<I> {
 
     FnLabel { label: FnLabel },
-    BrLabel { label: BrLabel },
+    BrLabel { label: BrLabel, producer: Producer },
 
     Push { value: Literal },
 
@@ -187,6 +184,13 @@ impl<T: fmt::Debug> fmt::Debug for Label<T> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Producer {
+    If,
+    Else,
+    Loop,
+}
+
 pub(crate) struct State<I> {
     pub(crate) counter: usize,
     pub(crate) bytecode: Vec<Instruction<I>>,
@@ -208,30 +212,15 @@ impl<I> State<I> {
     }
 }
 
-pub(crate) struct CodegenError {
-    pub(crate) errors: Vec<CodegenErrorKind>,
+pub(crate) enum CodegenError {
+    InvalidElse,
+    InvalidBreak,
 }
 
-pub(crate) enum CodegenErrorKind {
-    UnknownFn { name: String },
-}
-
-pub(crate) fn format_error(value: CodegenError) -> Vec<Diagnostic> {
-
-    let mut diags = Vec::new();
-
-    for error in value.errors {
-        let diag = match error {
-            CodegenErrorKind::UnknownFn { name } => Diagnostic::error("unknown function").note(name),
-        };
-        diags.push(diag);
+pub(crate) fn format_error(value: CodegenError) -> Diagnostic {
+    match value {
+        CodegenError::InvalidElse => Diagnostic::error("`else` block withput `if` block"),
+        CodegenError::InvalidBreak => Diagnostic::error("`break` outside loop"),
     }
-
-    diags
-
-}
-
-pub(crate) mod amd64 {
-
 }
 

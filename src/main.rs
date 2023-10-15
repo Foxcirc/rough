@@ -72,11 +72,9 @@ fn main() {
             Ok(()) => (),
             Err(err) => {
                 if opts.debug() {
-                    Diagnostic::debug("failed codegen").emit();
+                    Diagnostic::debug("codegen failed").emit();
                 }
-                for diag in codegen::format_error(err) {
-                    diag.emit();
-                }
+                codegen::format_error(err).emit();
                 return
             }
         };
@@ -95,6 +93,9 @@ fn main() {
     match typecheck::typecheck(bytecode) {
         Ok(()) => (),
         Err(err) => {
+            if opts.debug() {
+                Diagnostic::debug("typecheck failed").emit();
+            }
             typecheck::format_error(err).emit();
             return;
         }
