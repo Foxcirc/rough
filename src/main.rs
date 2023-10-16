@@ -15,12 +15,12 @@ fn main() {
     let opts = match cli::parse(env::args()) {
         Err(err) => {
             let diag = match err {
-                cli::CliError::ExpectedPath            => Diagnostic::error("Expected Path"),
-                cli::CliError::ExpectedMode            => Diagnostic::error("Expected Mode"),
-                cli::CliError::InvalidMode(other)      => Diagnostic::error("Invalid Mode").note(&other),
-                cli::CliError::ExpectedVerbosity       => Diagnostic::error("Expected Verbosity"),
-                cli::CliError::InvalidVerbosity(other) => Diagnostic::error("Invalid Verbosity").note(&other),
-                cli::CliError::InvalidFlag(other)      => Diagnostic::error("Invalid Flag").note(&other),
+                cli::CliError::ExpectedPath            => Diagnostic::error("expected path"),
+                cli::CliError::ExpectedMode            => Diagnostic::error("expected mode"),
+                cli::CliError::InvalidMode(other)      => Diagnostic::error("invalid mode").note(&other),
+                cli::CliError::ExpectedVerbosity       => Diagnostic::error("expected verbosity"),
+                cli::CliError::InvalidVerbosity(other) => Diagnostic::error("invalid verbosity").note(&other),
+                cli::CliError::InvalidFlag(other)      => Diagnostic::error("invalid flag").note(&other),
             };
             diag.emit();
             return
@@ -68,13 +68,17 @@ fn main() {
 
     for source_file in source_files.into_iter() {
 
+        let name = source_file.name().to_string();
+
         match codegen::codegen(&mut state, source_file) {
             Ok(()) => (),
             Err(err) => {
                 if opts.debug() {
                     Diagnostic::debug("codegen failed").emit();
                 }
-                codegen::format_error(err).emit();
+                codegen::format_error(err)
+                    .file(name)
+                    .emit();
                 return
             }
         };
@@ -174,7 +178,7 @@ pub(crate) mod parse_modules {
             Err(err) => return Err(Diagnostic::error("cannot read file").note(err.to_string()).file(file_name))
         };
 
-        let items = match parser::parse(&content, state.visited.len()) { // todo: is span_id needed?
+        let items = match parser::parse(&content) {
             Ok(val) => val,
             Err(err) => return Err(parser::format_error(err).file(file_name)),
         };

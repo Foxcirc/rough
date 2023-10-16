@@ -13,6 +13,7 @@ pub(crate) enum Level {
 pub(crate) struct Pos {
     pub(crate) line: usize,
     pub(crate) column: usize,
+    pub(crate) offset: usize,
 }
 
 #[derive(Clone)]
@@ -92,9 +93,9 @@ impl Diagnostic {
         }
 
         match (&self.file, &self.pos) {
-            (Some(path), Some(pos)) => output.push_str(&colorize!("[def]    in {}:{}:{}\n", path, pos.line, pos.column)),
+            (Some(path), Some(pos)) => output.push_str(&colorize!("[def]    in {}:{}:{} at offset {}\n", path, pos.line, pos.column, pos.offset)),
             (Some(path), None     ) => output.push_str(&colorize!("[def]    in file {}\n", path)),
-            (None,       Some(pos)) => output.push_str(&colorize!("[def]    at position {}:{}\n", pos.line, pos.column)),
+            (None,       Some(pos)) => output.push_str(&colorize!("[def]    at position {}:{} at offset {}\n", pos.line, pos.column, pos.offset)),
             (..) => (),
         }
 

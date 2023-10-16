@@ -1,14 +1,17 @@
 
 
 use std::fmt;
-use crate::{parser::{Literal, Op}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
+use crate::{parser::{Literal, OpKind, Op, Span}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
 
 pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
+    let name = source_file.name().to_string();
+
     for fun in source_file.items.funs {
-        state.bytecode.push(Instruction::FnLabel { label: Label::new(fun.name) });
+        state.bytecode.push(Instr::unspanned(InstrKind::FnLabel { label: Label::new(fun.name), signature: () })); // todo: use the span of the function or something here (and below)
+        state.bytecode.push(Instr::unspanned(InstrKind::FileStart { name: name.clone() }));
         codegen_block(state, fun.body, None)?;
-        state.bytecode.push(Instruction::Return);
+        state.bytecode.push(Instr::unspanned(InstrKind::Return));
     }
 
     Ok(())
@@ -19,90 +22,91 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 
     for op in block {
 
-        match op {
+        match op.kind {
 
-            Op::Push { value } => state.bytecode.push(Instruction::Push { value }),
+            OpKind::Push { value } => state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
 
-            Op::Call { name }  => {
+            OpKind::Call { name }  => {
                 let inrinsic = I::generate(&name);
                 let result = match inrinsic {
-                    Some(val) => Instruction::Intrinsic(val),
-                    None => Instruction::Call { to: Label::new(name) }
+                    Some(val) => InstrKind::Intrinsic(val),
+                    None => InstrKind::Call { to: Label::new(name) }
                 };
-                state.bytecode.push(result);
+                state.bytecode.push(Instr::spanned(result, op.span));
             },
 
-            Op::Copy  => state.bytecode.push(Instruction::Copy),
-            Op::Over  => state.bytecode.push(Instruction::Over),
-            Op::Swap  => state.bytecode.push(Instruction::Swap),
-            Op::Rot3  => state.bytecode.push(Instruction::Rot3),
-            Op::Rot4  => state.bytecode.push(Instruction::Rot4),
-            Op::Drop  => state.bytecode.push(Instruction::Drop),
+            OpKind::Copy  => state.bytecode.push(Instr::spanned(InstrKind::Copy, op.span)),
+            OpKind::Over  => state.bytecode.push(Instr::spanned(InstrKind::Over, op.span)),
+            OpKind::Swap  => state.bytecode.push(Instr::spanned(InstrKind::Swap, op.span)),
+            OpKind::Rot3  => state.bytecode.push(Instr::spanned(InstrKind::Rot3, op.span)),
+            OpKind::Rot4  => state.bytecode.push(Instr::spanned(InstrKind::Rot4, op.span)),
+            OpKind::Drop  => state.bytecode.push(Instr::spanned(InstrKind::Drop, op.span)),
 
-            Op::Read  => state.bytecode.push(Instruction::Read),
-            Op::Write => state.bytecode.push(Instruction::Write),
+            OpKind::Read  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)),
+            OpKind::Write => state.bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
 
-            Op::Move  => todo!(),
-            Op::Addr  => todo!(),
-            Op::Type  => todo!(),
-            Op::Size  => todo!(),
-            Op::Dot   => todo!(),
+            OpKind::Move  => todo!(),
+            OpKind::Addr  => todo!(),
+            OpKind::Type  => todo!(),
+            OpKind::Size  => todo!(),
+            OpKind::Dot   => todo!(),
 
-            Op::Add => state.bytecode.push(Instruction::Add),
-            Op::Sub => state.bytecode.push(Instruction::Sub),
-            Op::Mul => state.bytecode.push(Instruction::Mul),
-            Op::Dvm => state.bytecode.push(Instruction::Dvm),
+            OpKind::Add => state.bytecode.push(Instr::spanned(InstrKind::Add, op.span)),
+            OpKind::Sub => state.bytecode.push(Instr::spanned(InstrKind::Sub, op.span)),
+            OpKind::Mul => state.bytecode.push(Instr::spanned(InstrKind::Mul, op.span)),
+            OpKind::Dvm => state.bytecode.push(Instr::spanned(InstrKind::Dvm, op.span)),
 
-            Op::Not => state.bytecode.push(Instruction::Not),
-            Op::And => state.bytecode.push(Instruction::And),
-            Op::Or  => state.bytecode.push(Instruction::Or),
-            Op::Xor => state.bytecode.push(Instruction::Xor),
+            OpKind::Not => state.bytecode.push(Instr::spanned(InstrKind::Not, op.span)),
+            OpKind::And => state.bytecode.push(Instr::spanned(InstrKind::And, op.span)),
+            OpKind::Or  => state.bytecode.push(Instr::spanned(InstrKind::Or,  op.span)),
+            OpKind::Xor => state.bytecode.push(Instr::spanned(InstrKind::Xor, op.span)),
 
-            Op::Eq  => state.bytecode.push(Instruction::Eq),
-            Op::Gt  => state.bytecode.push(Instruction::Gt),
-            Op::Gte => state.bytecode.push(Instruction::Gte),
-            Op::Lt  => state.bytecode.push(Instruction::Lt),
-            Op::Lte => state.bytecode.push(Instruction::Lte),
+            OpKind::Eq  => state.bytecode.push(Instr::spanned(InstrKind::Eq,  op.span)),
+            OpKind::Gt  => state.bytecode.push(Instr::spanned(InstrKind::Gt,  op.span)),
+            OpKind::Gte => state.bytecode.push(Instr::spanned(InstrKind::Gte, op.span)),
+            OpKind::Lt  => state.bytecode.push(Instr::spanned(InstrKind::Lt,  op.span)),
+            OpKind::Lte => state.bytecode.push(Instr::spanned(InstrKind::Lte, op.span)),
 
-            Op::If { block } => {
+            OpKind::If { block: if_block } => {
 
                 let end = state.next_label();
-                state.bytecode.push(Instruction::Bne { to: end });
-                codegen_block(state, block, loop_escape)?;
-                state.bytecode.push(Instruction::BrLabel { label: end, producer: Producer::If });
+                state.bytecode.push(Instr::spanned(InstrKind::Bne { to: end }, op.span));
+                codegen_block(state, if_block, loop_escape)?;
+                state.bytecode.push(Instr::spanned(InstrKind::BrLabel { label: end, producer: Producer::If }, op.span));
 
             },
-            Op::Elif { block: _block } => todo!(),
-            Op::Else { block } => {
+            OpKind::Elif { block: _block } => todo!(),
+            OpKind::Else { block: else_block } => {
 
                 // check that this `else` is coming directly after an `if`
-                if !matches!(state.bytecode.last(), Some(Instruction::BrLabel { producer: Producer::If, .. })) {
-                    return Err(CodegenError::InvalidElse)
+                if !matches!(state.bytecode.last().map(|val| &val.kind), Some(InstrKind::BrLabel { producer: Producer::If, .. })) {
+                    return Err(CodegenError::spanned(CodegenErrorKind::InvalidElse, op.span))
                 }
 
                 let end = state.next_label();
-                state.bytecode.insert(state.bytecode.len() - 1, Instruction::Bra { to: end });
-                codegen_block(state, block, loop_escape)?;
-                state.bytecode.push(Instruction::BrLabel { label: end, producer: Producer::Else });
+                state.bytecode.insert(state.bytecode.len() - 1, Instr::spanned(InstrKind::Bra { to: end }, op.span));
+                codegen_block(state, else_block, loop_escape)?;
+                state.bytecode.push(Instr::spanned(InstrKind::BrLabel { label: end, producer: Producer::Else }, op.span));
 
             },
-            Op::Loop { block } => {
+            OpKind::Loop { block: loop_block } => {
 
                 let start = state.next_label();
                 let escape = state.next_label();
-                state.bytecode.push(Instruction::BrLabel { label: start, producer: Producer::Loop });
-                codegen_block(state, block, Some(escape))?;
-                state.bytecode.push(Instruction::Bra { to: start });
+                state.bytecode.push(Instr::spanned(InstrKind::BrLabel { label: start, producer: Producer::Loop }, op.span));
+                codegen_block(state, loop_block, Some(escape))?;
+                state.bytecode.push(Instr::spanned(InstrKind::Bra { to: start }, op.span));
+                state.bytecode.push(Instr::spanned(InstrKind::BrLabel { label: escape, producer: Producer::Break }, op.span));
 
             },
-            Op::For  { block: _block } => todo!(),
-            Op::Break => {
+            OpKind::For  { block: _block } => todo!(),
+            OpKind::Break => {
 
                 let escape = match loop_escape {
                     Some(val) => val,
-                    None => return Err(CodegenError::InvalidBreak),
+                    None => return Err(CodegenError::spanned(CodegenErrorKind::InvalidBreak, op.span)),
                 };
-                state.bytecode.push(Instruction::Bra { to: escape })
+                state.bytecode.push(Instr::spanned(InstrKind::Bra { to: escape }, op.span))
 
             },
         };
@@ -113,11 +117,33 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Instruction<I> {
+#[derive(PartialEq, Eq)]
+pub(crate) struct Instr<I> {
+    pub(crate) kind: InstrKind<I>,
+    pub(crate) span: Span,
+}
 
-    FnLabel { label: FnLabel },
-    BrLabel { label: BrLabel, producer: Producer },
+impl<I: fmt::Debug> fmt::Debug for Instr<I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.kind)
+    }
+}
+
+impl<I> Instr<I> {
+    pub(crate) fn spanned(kind: InstrKind<I>, span: Span) -> Self {
+        Self { kind, span }
+    }
+    pub(crate) fn unspanned(kind: InstrKind<I>) -> Self {
+        Self { kind, span: Span::default() }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum InstrKind<I> {
+
+    FileStart { name: String },
+    FnLabel { label: FnLabel, signature: () }, // todo: rename FnStart?
+    BrLabel { label: BrLabel, producer: Producer }, // todo: rename?
 
     Push { value: Literal },
 
@@ -189,11 +215,12 @@ pub(crate) enum Producer {
     If,
     Else,
     Loop,
+    Break,
 }
 
 pub(crate) struct State<I> {
     pub(crate) counter: usize,
-    pub(crate) bytecode: Vec<Instruction<I>>,
+    pub(crate) bytecode: Vec<Instr<I>>,
 }
 
 impl<I> Default for State<I> {
@@ -212,15 +239,27 @@ impl<I> State<I> {
     }
 }
 
-pub(crate) enum CodegenError {
+pub(crate) struct CodegenError {
+    pub(crate) kind: CodegenErrorKind,
+    pub(crate) span: Span,
+}
+
+impl CodegenError {
+    pub(crate) fn spanned(kind: CodegenErrorKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+}
+
+pub(crate) enum CodegenErrorKind {
     InvalidElse,
     InvalidBreak,
 }
 
 pub(crate) fn format_error(value: CodegenError) -> Diagnostic {
-    match value {
-        CodegenError::InvalidElse => Diagnostic::error("`else` block withput `if` block"),
-        CodegenError::InvalidBreak => Diagnostic::error("`break` outside loop"),
-    }
+    let diag = match &value.kind {
+        CodegenErrorKind::InvalidElse => Diagnostic::error("`else` block withput `if` block"),
+        CodegenErrorKind::InvalidBreak => Diagnostic::error("`break` outside loop"),
+    };
+    diag.pos(value.span.to_pos())
 }
 

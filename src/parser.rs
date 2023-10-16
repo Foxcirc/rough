@@ -1,10 +1,10 @@
 
-use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
+use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
 use nom_locate::LocatedSpan;
 use crate::diagnostic;
 
-pub(crate) fn parse(dat: &str, span_id: usize) -> Result<ParseTranslationUnit, ParseError> {
-    parse_items(LocatedSpan::new_extra(dat, span_id)).finish().map(|(_, items)| items)
+pub(crate) fn parse(dat: &str) -> Result<ParseTranslationUnit, ParseError> {
+    parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
 }
 
 pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ParseTranslationUnit> {
@@ -88,58 +88,61 @@ pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
 }
 
 pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
-    context("Op", alt((
+    context("Op", map(
         alt((
-            value(Op::Copy,  char('*')),
-            value(Op::Over,  char('+')),
-            value(Op::Swap,  terminated(char('-'),   multispace1)), // could also be the start of an ident
-            value(Op::Rot3,  terminated(tag("rot3"), multispace1)),
-            value(Op::Rot4,  terminated(tag("rot4"), multispace1)),
-            value(Op::Drop,  char('~')),
-            value(Op::Read,  char('>')),
-            value(Op::Write, char('<')),
-            value(Op::Move,  char('~')),
-            value(Op::Addr,  char('&')),
-            value(Op::Type,  char('?')),
-            value(Op::Size,  char('!')),
-            value(Op::Dot,   char('.')),
+            alt((
+                value(OpKind::Copy,  char('*')),
+                value(OpKind::Over,  char('+')),
+                value(OpKind::Swap,  terminated(char('-'),   multispace1)), // could also be the start of an ident
+                value(OpKind::Rot3,  terminated(tag("rot3"), multispace1)),
+                value(OpKind::Rot4,  terminated(tag("rot4"), multispace1)),
+                value(OpKind::Drop,  char('~')),
+                value(OpKind::Read,  char('>')),
+                value(OpKind::Write, char('<')),
+                value(OpKind::Move,  char('~')),
+                value(OpKind::Addr,  char('&')),
+                value(OpKind::Type,  char('?')),
+                value(OpKind::Size,  char('!')),
+                value(OpKind::Dot,   char('.')),
+            )),
+            alt((
+                value(OpKind::Add, terminated(tag("add"), multispace1)),
+                value(OpKind::Sub, terminated(tag("sub"), multispace1)),
+                value(OpKind::Mul, terminated(tag("mul"), multispace1)),
+                value(OpKind::Dvm, terminated(tag("dvm"), multispace1)),
+                value(OpKind::Not, terminated(tag("not"), multispace1)),
+                value(OpKind::And, terminated(tag("and"), multispace1)),
+                value(OpKind::Or,  terminated(tag("or"),  multispace1)),
+                value(OpKind::Xor, terminated(tag("xor"), multispace1)),
+                value(OpKind::Eq,  terminated(tag("eq"),  multispace1)),
+                value(OpKind::Gt,  terminated(tag("gt"),  multispace1)),
+                value(OpKind::Gte, terminated(tag("gte"), multispace1)),
+                value(OpKind::Lt,  terminated(tag("lt"),  multispace1)),
+                value(OpKind::Lte, terminated(tag("lte"), multispace1)),
+            )),
+            alt((
+                map(preceded(pair(tag("if"),   multispace0), cut(parse_block)), |block| OpKind::If   { block }),
+                map(preceded(pair(tag("elif"), multispace0), cut(parse_block)), |block| OpKind::Elif { block }),
+                map(preceded(pair(tag("else"), multispace0), cut(parse_block)), |block| OpKind::Else { block }),
+                map(preceded(pair(tag("loop"), multispace0), cut(parse_block)), |block| OpKind::Loop { block }),
+                map(preceded(pair(tag("for"),  multispace0), cut(parse_block)), |block| OpKind::For  { block }),
+                value(OpKind::Break, tag("break")),
+            )),
+            alt((
+                value(OpKind::Push { value: Literal::Bool(true) },  tag("true")),
+                value(OpKind::Push { value: Literal::Bool(false) }, tag("false")),
+            )),
+            alt((
+                map(
+                    terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
+                    |integer| OpKind::Push { value: Literal::Int(integer) }
+                ),
+                map(parse_str_escaped, |string|  OpKind::Push { value: Literal::Str(string) }),
+                map(parse_ident,       |name|    OpKind::Call { name })
+            )),
         )),
-        alt((
-            value(Op::Add, terminated(tag("add"), multispace1)),
-            value(Op::Sub, terminated(tag("sub"), multispace1)),
-            value(Op::Mul, terminated(tag("mul"), multispace1)),
-            value(Op::Dvm, terminated(tag("dvm"), multispace1)),
-            value(Op::Not, terminated(tag("not"), multispace1)),
-            value(Op::And, terminated(tag("and"), multispace1)),
-            value(Op::Or,  terminated(tag("or"),  multispace1)),
-            value(Op::Xor, terminated(tag("xor"), multispace1)),
-            value(Op::Eq,  terminated(tag("eq"),  multispace1)),
-            value(Op::Gt,  terminated(tag("gt"),  multispace1)),
-            value(Op::Gte, terminated(tag("gte"), multispace1)),
-            value(Op::Lt,  terminated(tag("lt"),  multispace1)),
-            value(Op::Lte, terminated(tag("lte"), multispace1)),
-        )),
-        alt((
-            map(preceded(pair(tag("if"),   multispace0), cut(parse_block)), |block| Op::If   { block }),
-            map(preceded(pair(tag("elif"), multispace0), cut(parse_block)), |block| Op::Elif { block }),
-            map(preceded(pair(tag("else"), multispace0), cut(parse_block)), |block| Op::Else { block }),
-            map(preceded(pair(tag("loop"), multispace0), cut(parse_block)), |block| Op::Loop { block }),
-            map(preceded(pair(tag("for"),  multispace0), cut(parse_block)), |block| Op::For  { block }),
-            value(Op::Break, tag("break")),
-        )),
-        alt((
-            value(Op::Push { value: Literal::Bool(true) },  tag("true")),
-            value(Op::Push { value: Literal::Bool(false) }, tag("false")),
-        )),
-        alt((
-            map(
-                terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
-                |integer| Op::Push { value: Literal::Int(integer) }
-            ),
-            map(parse_str_escaped, |string|  Op::Push { value: Literal::Str(string) }),
-            map(parse_ident,       |name|    Op::Call { name })
-        )),
-    )))(dat)
+        |kind| Op { kind, span: Span::from_located_span(&dat) }
+    ))(dat)
 }
 
 pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
@@ -205,7 +208,7 @@ pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
 }
 
 pub(crate) type ParseResult<'a, O> = IResult<ParseInput<'a>, O, ParseError<'a>>;
-pub(crate) type ParseInput<'a> = LocatedSpan<&'a str, usize>; // todo convert to LocatedSpan<str> for use with convert_error
+pub(crate) type ParseInput<'a> = LocatedSpan<&'a str>; // todo convert to LocatedSpan<str> for use with convert_error
 pub(crate) type ParseError<'a> = VerboseError<ParseInput<'a>>;
 
 pub(crate) fn format_error(value: ParseError) -> diagnostic::Diagnostic {
@@ -216,7 +219,7 @@ pub(crate) fn format_error(value: ParseError) -> diagnostic::Diagnostic {
         let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
         let (before, highlight, after) = split_at_char_index(code, span.get_utf8_column() - 1);
         diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
-        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column() });
+        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column(), offset: span.location_offset() });
     }
 
     for (_, kind) in value.errors.iter() {
@@ -249,7 +252,7 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct TranslationUnit<U> {
+pub(crate) struct TranslationUnit<U> { // todo: dont use generics here :/
     pub uses: U,
     pub funs: Vec<Fun>,
     pub types: Vec<Type>,
@@ -312,7 +315,13 @@ pub(crate) enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Op {
+pub(crate) struct Op {
+    pub(crate) kind: OpKind,
+    pub(crate) span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum OpKind {
 
     Push { value: Literal },
 
@@ -380,31 +389,28 @@ fn to_identstr(value: ParseInput) -> String {
     value.fragment().to_string()
 }
 
-// todo: store everything more efficiently (Arena, Pinned Buffer?) (bumpalo, id_arena?)
+// todo: store everything more efficiently (Arena, Pinned Buffer?) (bumpalo, blink_alloc?)
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-// pub(crate) struct Span {
-//     pub(crate) id: usize,
-//     pub(crate) start: u32,
-//     pub(crate) end: u32,
-// }
-// 
-// impl Span {
-// 
-//     pub(crate) fn inside<'a>(&self, src: &'a str) -> &'a str {
-//         &src[self.start as usize .. self.end as usize]
-//     }
-// 
-//     pub(crate) fn with(mut self, id: usize) -> Self {
-//         self.id = id;
-//         self
-//     }
-// 
-// }
-// 
-// /// compute the index range for a given LocatedSpan
-// fn to_span(value: ParseInput) -> Span {
-//     let offset = value.location_offset();
-//     Span { id: value.extra, start: offset as u32, end: (offset + value.len()) as u32 }
-// }
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)] // todo: do we really need this much derives on all of the types
+pub(crate) struct Span {
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+    pub(crate) line: u32,
+    pub(crate) column: u32,
+}
+
+impl Span {
+    pub(crate) fn from_located_span(value: &ParseInput) -> Self {
+        let offset = value.location_offset() as u32;
+        Span {
+            start: offset,
+            end: offset + value.len() as u32,
+            line: value.location_line(),
+            column: value.get_utf8_column() as u32,
+        }
+    }
+    pub(crate) fn to_pos(self) -> diagnostic::Pos {
+        diagnostic::Pos { line: self.line as usize, column: self.column as usize, offset: self.start as usize }
+    }
+}
 
