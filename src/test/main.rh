@@ -4,17 +4,16 @@
 // }
 
 fn main {
-    1 2 add ~
+    1 2 add
     3 eq if {
         1
     } else {
         2
     }
     ~
-    break
 }
 
-fn add-intrinsic {
+fn add-intrinsic: int int - int {
     add
 }
 

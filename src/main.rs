@@ -70,7 +70,7 @@ fn main() {
 
         let name = source_file.name().to_string();
 
-        match codegen::codegen(&mut state, source_file) {
+        match codegen::codegen(&mut state, source_file) { // todo: add debug timings for codegen
             Ok(()) => (),
             Err(err) => {
                 if opts.debug() {
