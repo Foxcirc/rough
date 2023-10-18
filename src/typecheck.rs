@@ -23,7 +23,7 @@ pub(crate) fn typecheck<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>) -> Re
 
 fn eval_fn<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, stack: &mut Vec<Type>, body: &Bytecode<I>, start: usize, end: InstrKind<I>) -> Result<(), TypeError> {
 
-    let mut file_name = "{unknown}"; // todo: make every function have a file name as associated
+    let file_name = "{unknown}"; // todo: make every function have a file name as associated
     // metadata
     let mut ip = start;
 

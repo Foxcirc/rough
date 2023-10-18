@@ -1,11 +1,11 @@
 
 
-use std::{fmt, collections::HashMap, iter};
+use std::{fmt, collections::HashMap};
 use crate::{parser::{Literal, OpKind, Op, Span, IdentStr}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
 
-pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
+pub(crate) fn codegen<I: Intrinsic>(state: &mut Program<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
-    let file_name = source_file.name().to_string();
+    // let file_name = source_file.name().to_string();
 
     for fun in source_file.items.funs {
 
@@ -209,20 +209,37 @@ pub(crate) enum Producer {
     Break,
 }
 
-pub(crate) struct State<I> {
-    pub(crate) funs: HashMap<IdentStr, Bytecode<I>>,
+struct State<I> {
+    pub bytecode: Vec<Instr<I>>,
+    pub counter: usize,
 }
 
 impl<I> Default for State<I> {
     fn default() -> Self {
         Self {
-            funs: HashMap::new(),
+            bytecode: Vec::new(),
+            counter: 0
         }
     }
 }
 
+impl<I> State<I> {
+    pub fn next_label(&mut self) -> usize {
+        self.counter += 1;
+        self.counter
+    }
+}
+
 pub(crate) struct Program<I> {
-    funs: HashMap<IdentStr, Bytecode<I>>
+    pub funs: HashMap<IdentStr, Bytecode<I>>,
+}
+
+impl<I> Default for Program<I> {
+    fn default() -> Self {
+        Self {
+            funs: HashMap::new(),
+        }
+    }
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;

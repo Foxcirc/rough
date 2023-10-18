@@ -66,13 +66,13 @@ fn main() {
 
     // we now need to genrate code for the source files
 
-    let mut state = codegen::State::<arch::Intel64>::default();
+    let mut program = codegen::Program::default();
 
     for source_file in source_files.into_iter() {
 
         let name = source_file.name().to_string();
 
-        match codegen::codegen(&mut state, source_file) { // todo: add debug timings for codegen
+        match codegen::codegen::<arch::Intel64>(&mut program, source_file) { // todo: add debug timings for codegen
             Ok(()) => (),
             Err(err) => {
                 if opts.debug() {
@@ -89,10 +89,10 @@ fn main() {
 
     if opts.mode == cli::Mode::ShowIr {
         Diagnostic::debug("showing intermediate representation").emit();
-        format_bytecode(&state.funs);
+        format_bytecode(&program.funs);
     }
 
-    match typecheck::typecheck(&state.funs) {
+    match typecheck::typecheck(&program.funs) {
         Ok(()) => (),
         Err(err) => {
             if opts.debug() {
@@ -164,19 +164,17 @@ pub(crate) mod parse_modules {
 
     pub(crate) fn parse_modules(state: &mut State, path: PathBuf) -> Result<(), Diagnostic> {
 
-        if !state.visited.insert(path.clone()) { // todo: clone?
-
+        if state.visited.contains(&path) {
             let idx = state.source_files.iter()
                 .position(|item: &SourceFile| &item.path == &path)
                 .expect("visited path not found");
-
             // move this entry to the last position
             let item = state.source_files.remove(idx).expect("invalid index");
             state.source_files.push_front(item);
-
             return Ok(())
+        }
 
-        };
+        state.visited.insert(Clone::clone(&path));
 
         let (base, file_name) = split_file_name(&path)?;
 
@@ -204,7 +202,6 @@ pub(crate) mod parse_modules {
 
         state.source_files.push_back(SourceFile {
             path,
-            content,
             items: ModuleTranslationUnit {
                 uses: module_map,
                 funs: items.funs,
@@ -237,7 +234,6 @@ pub(crate) mod parse_modules {
     #[derive(Debug)]
     pub(crate) struct SourceFile {
         pub(crate) path: PathBuf,
-        pub(crate) content: String,
         pub(crate) items: ModuleTranslationUnit
     }
 
