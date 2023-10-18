@@ -1,17 +1,17 @@
 
-use std::{convert::identity, iter};
+use std::{convert::identity, iter, collections::HashMap};
 
-use crate::{codegen::{InstrKind, BrLabel, FnLabel, Producer, Instr}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, BrLabel, FnLabel, Producer, Instr, Bytecode}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
 
-pub(crate) fn typecheck<I: Intrinsic>(bytecode: Vec<Instr<I>>) -> Result<(), TypeError> {
+pub(crate) fn typecheck<I: Intrinsic>(funs: HashMap<String, Bytecode<I>>) -> Result<(), TypeError> {
 
-    let main = match find_fn_label(&bytecode, &FnLabel::new("main".to_string())) {
+    let main = match funs.get("main") {
         Some(val) => val,
         None => return Err(TypeError::unspanned(TypeErrorKind::MissingMain))
     };
 
     let mut stack = Vec::new();
-    eval_fn(&bytecode, &mut stack, main, InstrKind::Return)?;
+    eval_fn(&funs, &mut stack, main, 0, InstrKind::Return)?;
 
     if !stack.is_empty() {
         return Err(TypeError::unspanned(TypeErrorKind::InvalidMain { got: stack }))
@@ -21,24 +21,21 @@ pub(crate) fn typecheck<I: Intrinsic>(bytecode: Vec<Instr<I>>) -> Result<(), Typ
 
 }
 
-fn eval_fn<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec<Type>, start: usize, end: InstrKind<I>) -> Result<(), TypeError> {
+fn eval_fn<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, stack: &mut Vec<Type>, body: &Bytecode<I>, start: usize, end: InstrKind<I>) -> Result<(), TypeError> {
 
-    let mut file_name = "{unknown}";
+    let mut file_name = "{unknown}"; // todo: make every function have a file name as associated
+    // metadata
     let mut ip = start;
 
     loop {
 
-        let instr = &bytecode[ip];
+        let instr = &funs[ip];
 
         if &instr.kind == &end {
             return Ok(())
         }
 
-        if let InstrKind::FileStart { name } = &instr.kind {
-            file_name = name;
-        }
-
-        match eval_instr(bytecode, stack, &mut ip, &instr.kind) {
+        match eval_instr(funs, stack, &mut ip, &instr.kind) {
             Ok(()) => (),
             Err(mut err) => {
                 err.file_span = FileSpan {
@@ -68,7 +65,17 @@ pub(crate) fn eval_instr<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec
                 Some(val) => val,
                 None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.inner.clone() }))
             };
-            eval_fn(bytecode, stack, position, InstrKind::Return)?;
+            let fun = &bytecode[position].kind;
+            if let InstrKind::FnLabel { label, signature } = fun {
+                let elems = split_signature_dynamic(stack, signature.takes.len());
+                for (lhs, rhs) in iter::zip(signature, &elems) {
+                    if Some(lhs) != rhs { return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: signature.takes.to_vec(), got: elems.into_iter().filter_map(identity).collect() })) }
+                }
+                stack.extend(signature.returns);
+            } else {
+                unreachable!()
+            }
+            // eval_fn(bytecode, stack, position, InstrKind::Return)?;
         },
         InstrKind::Return => (),
 
@@ -288,6 +295,16 @@ pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Type>) -> [Option<Ty
     const NONE: Option<Type> = None;
     let mut res = [NONE; N];
     let start = if vec.len() < N { vec.len() - 1 } else { vec.len() - N };
+    for (idx, item) in vec.drain(start..).rev().enumerate() {
+        res[idx] = Some(item);
+    }
+    res
+}
+
+pub(crate) fn split_signature_dynamic(vec: &mut Vec<Type>, n: usize) -> Vec<Option<Type>> {
+    const NONE: Option<Type> = None;
+    let mut res = vec![NONE; n];
+    let start = if vec.len() < n { vec.len() - 1 } else { vec.len() - n };
     for (idx, item) in vec.drain(start..).rev().enumerate() {
         res[idx] = Some(item);
     }

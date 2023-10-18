@@ -7,8 +7,10 @@ pub mod codegen;
 pub mod typecheck;
 pub mod diagnostic;
 
-use std::{env, time};
+use std::{env, time, collections::HashMap, fmt};
+use codegen::Bytecode;
 use diagnostic::Diagnostic;
+use parser::IdentStr;
 
 fn main() {
     
@@ -85,16 +87,14 @@ fn main() {
 
     }
 
-    let bytecode = state.bytecode;
+    let funs = state.funs;
 
     if opts.mode == cli::Mode::ShowIr {
         Diagnostic::debug("showing intermediate representation").emit();
-        for (idx, instruction) in bytecode.iter().enumerate() {
-            eprintln!("{:3}: {:?}", idx, instruction);
-        }
+        format_bytecode(&state.funs);
     }
 
-    match typecheck::typecheck(bytecode) {
+    match typecheck::typecheck(&funs) {
         Ok(()) => (),
         Err(err) => {
             if opts.debug() {
@@ -148,6 +148,15 @@ pub(crate) mod arch {
         }
     }
 
+}
+
+fn format_bytecode<I: fmt::Debug>(funs: &HashMap<IdentStr, Bytecode<I>>) {
+    for (name, bytecode) in funs.iter() {
+        eprintln!("fn {}:", name);
+        for (idx, instruction) in bytecode.iter().enumerate() {
+            eprintln!("{:3}: {:?}", idx, instruction);
+        }
+    }
 }
 
 pub(crate) mod parse_modules {

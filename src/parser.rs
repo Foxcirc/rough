@@ -54,7 +54,7 @@ pub(crate) fn parse_fun(dat: ParseInput) -> ParseResult<Item> {
             preceded(multispace0, opt(parse_signature)),
             preceded(multispace0, parse_block),
         )),
-        |(name, signature, block)| Item::Fun(Fun { name, signature: signature.unwrap_or_default(), body: block })
+        |(name, signature, block)| Item::Fun(Fun { name, signature: signature.unwrap_or_default(), body: block, span: Span::from_located_span(&dat) })
     )(dat)
 }
 
@@ -67,7 +67,7 @@ pub(crate) fn parse_type(dat: ParseInput) -> ParseResult<Item> {
     )(dat)
 }
 
-pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Signature> {
+pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Signature<IdentStr>> {
     map(
         tuple((
             preceded(multispace0, char(':')),
@@ -277,15 +277,28 @@ pub(crate) struct Use {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Fun {
     pub name: IdentStr,
-    pub signature: Signature,
+    pub span: Span,
+    pub signature: ParsedSignature,
     pub body: Block,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub(crate) struct Signature {
-    pub takes: Vec<IdentStr>,
-    pub returns: Vec<IdentStr>,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Signature<T> {
+    pub takes: Vec<T>,
+    pub returns: Vec<T>,
 }
+
+impl<I> Default for Signature<I> {
+    fn default() -> Self {
+        Self {
+            takes: Vec::default(),
+            returns: Vec::default(),
+        }
+    }
+}
+
+pub(crate) type ParsedSignature = Signature<IdentStr>;
+pub(crate) type FnSignature = Signature<Type>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
@@ -393,8 +406,7 @@ fn to_identstr(value: ParseInput) -> String {
 
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)] // todo: do we really need this much derives on all of the types
 pub(crate) struct Span {
-    pub(crate) start: u32,
-    pub(crate) end: u32,
+    pub(crate) offset: u32,
     pub(crate) line: u32,
     pub(crate) column: u32,
 }
@@ -403,14 +415,17 @@ impl Span {
     pub(crate) fn from_located_span(value: &ParseInput) -> Self {
         let offset = value.location_offset() as u32;
         Span {
-            start: offset,
-            end: offset + value.len() as u32,
+            offset,
             line: value.location_line(),
             column: value.get_utf8_column() as u32,
         }
     }
     pub(crate) fn to_pos(self) -> diagnostic::Pos {
-        diagnostic::Pos { line: self.line as usize, column: self.column as usize, offset: self.start as usize }
+        diagnostic::Pos {
+            line: self.line as usize,
+            column: self.column as usize,
+            offset: self.offset as usize
+        }
     }
 }
 
