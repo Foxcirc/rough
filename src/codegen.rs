@@ -1,7 +1,7 @@
 
 
-use std::{fmt, collections::HashMap};
-use crate::{parser::{Literal, OpKind, Op, Span, ParsedSignature, FnSignature, Type, IdentStr}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
+use std::{fmt, collections::HashMap, iter};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
 
 pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
 
@@ -9,17 +9,10 @@ pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_mod
 
     for fun in source_file.items.funs {
 
-        let signature = match codegen_signature(fun.signature) {
-            Ok(val) => val,
-            Err(kind) => return Err(CodegenError::spanned(kind, fun.span)),
-        };
-
         let mut bytecode = Bytecode::new();
+        let mut counter = 0;
 
-        bytecode.push(Instr::spanned(InstrKind::FnLabel { label: Label::new(fun.name), signature }, fun.span));
-        bytecode.push(Instr::spanned(InstrKind::FileStart { name: file_name.clone() }, fun.span));
-
-        codegen_block(&mut bytecode, fun.body, None)?;
+        codegen_block(&mut bytecode, &mut counter, fun.body, None)?;
 
         bytecode.push(Instr::spanned(InstrKind::Return, fun.span));
 
@@ -31,33 +24,7 @@ pub(crate) fn codegen<I: Intrinsic>(state: &mut State<I>, source_file: parse_mod
 
 }
 
-fn codegen_signature(raw_signature: ParsedSignature) -> Result<FnSignature, CodegenErrorKind> {
-
-    let mut signature = FnSignature::default();
-
-    for item in raw_signature.takes {
-        let result = match &item[..] {
-            "int" => Type::Int,
-            "bool" => Type::Int,
-            other => return Err(CodegenErrorKind::InvalidSignature)
-        };
-        signature.takes.push(result);
-    }
-
-    for item in raw_signature.returns {
-        let result = match &item[..] {
-            "int" => Type::Int,
-            "bool" => Type::Int,
-            other => return Err(CodegenErrorKind::InvalidSignature)
-        };
-        signature.returns.push(result);
-    }
-
-    Ok(signature)
-
-}
-
-fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, block: Vec<Op>, loop_escape: Option<BrLabel>) -> Result<(), CodegenError> {
+fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, counter: &mut usize, block: Vec<Op>, loop_escape: Option<Label>) -> Result<(), CodegenError> {
 
     for op in block {
 
@@ -69,7 +36,7 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, block: Vec<Op>, loop_
                 let inrinsic = I::generate(&name);
                 let result = match inrinsic {
                     Some(val) => InstrKind::Intrinsic(val),
-                    None => InstrKind::Call { to: Label::new(name) }
+                    None => InstrKind::Call { to: name }
                 };
                 bytecode.push(Instr::spanned(result, op.span));
             },
@@ -108,34 +75,34 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, block: Vec<Op>, loop_
 
             OpKind::If { block: if_block } => {
 
-                let end = state.next_label();
+                let end = next_label(counter);
                 bytecode.push(Instr::spanned(InstrKind::Bne { to: end }, op.span));
-                codegen_block(state, if_block, loop_escape)?;
-                bytecode.push(Instr::spanned(InstrKind::BrLabel { label: end, producer: Producer::If }, op.span));
+                codegen_block(bytecode, counter, if_block, loop_escape)?;
+                bytecode.push(Instr::spanned(InstrKind::Label { label: end, producer: Producer::If }, op.span));
 
             },
             OpKind::Elif { block: _block } => todo!(),
             OpKind::Else { block: else_block } => {
 
                 // check that this `else` is coming directly after an `if`
-                if !matches!(bytecode.last().map(|val| &val.kind), Some(InstrKind::BrLabel { producer: Producer::If, .. })) {
+                if !matches!(bytecode.last().map(|val| &val.kind), Some(InstrKind::Label { producer: Producer::If, .. })) {
                     return Err(CodegenError::spanned(CodegenErrorKind::InvalidElse, op.span))
                 }
 
-                let end = state.next_label();
+                let end = next_label(counter);
                 bytecode.insert(bytecode.len() - 1, Instr::spanned(InstrKind::Bra { to: end }, op.span));
-                codegen_block(state, else_block, loop_escape)?;
-                bytecode.push(Instr::spanned(InstrKind::BrLabel { label: end, producer: Producer::Else }, op.span));
+                codegen_block(bytecode, counter, else_block, loop_escape)?;
+                bytecode.push(Instr::spanned(InstrKind::Label { label: end, producer: Producer::Else }, op.span));
 
             },
             OpKind::Loop { block: loop_block } => {
 
-                let start = state.next_label();
-                let escape = state.next_label();
-                bytecode.push(Instr::spanned(InstrKind::BrLabel { label: start, producer: Producer::Loop }, op.span));
-                codegen_block(state, loop_block, Some(escape))?;
+                let start = next_label(counter);
+                let escape = next_label(counter);
+                bytecode.push(Instr::spanned(InstrKind::Label { label: start, producer: Producer::Loop }, op.span));
+                codegen_block(bytecode, counter, loop_block, Some(escape))?;
                 bytecode.push(Instr::spanned(InstrKind::Bra { to: start }, op.span));
-                bytecode.push(Instr::spanned(InstrKind::BrLabel { label: escape, producer: Producer::Break }, op.span));
+                bytecode.push(Instr::spanned(InstrKind::Label { label: escape, producer: Producer::Break }, op.span));
 
             },
             OpKind::For  { block: _block } => todo!(),
@@ -154,6 +121,11 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, block: Vec<Op>, loop_
 
     Ok(())
 
+}
+
+fn next_label(counter: &mut usize) -> usize {
+    *counter += 1;
+    *counter
 }
 
 #[derive(PartialEq, Eq)]
@@ -180,13 +152,11 @@ impl<I> Instr<I> {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InstrKind<I> {
 
-    FileStart { name: String },
-    FnLabel { label: FnLabel, signature: FnSignature }, // todo: rename FnStart?
-    BrLabel { label: BrLabel, producer: Producer }, // todo: rename?
+    Label { label: Label, producer: Producer }, // todo: rename?
 
     Push { value: Literal },
 
-    Call { to: FnLabel },
+    Call { to: IdentStr },
     Return,
 
     Drop,
@@ -222,32 +192,14 @@ pub(crate) enum InstrKind<I> {
     Lt,
     Lte,
 
-    Bne { to: BrLabel }, // todo: make it all tuple variants
-    Bra { to: BrLabel },
+    Bne { to: Label }, // todo: make it all tuple variants
+    Bra { to: Label },
 
     Intrinsic(I),
 
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)] // todo: remove eq?
-pub(crate) struct Label<T> {
-    pub(crate) inner: T,
-}
-
-impl<T> Label<T> {
-    pub(crate) fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
-pub(crate) type FnLabel = Label<String>;
-pub(crate) type BrLabel = Label<usize>;
-
-impl<T: fmt::Debug> fmt::Debug for Label<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Label({:?})", self.inner)
-    }
-}
+pub(crate) type Label = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Producer {
@@ -258,23 +210,14 @@ pub(crate) enum Producer {
 }
 
 pub(crate) struct State<I> {
-    pub(crate) counter: usize,
     pub(crate) funs: HashMap<IdentStr, Bytecode<I>>,
 }
 
 impl<I> Default for State<I> {
     fn default() -> Self {
         Self {
-            counter: 0,
             funs: HashMap::new(),
         }
-    }
-}
-
-impl<I> State<I> {
-    fn next_label(&mut self) -> BrLabel {
-        self.counter += 1;
-        Label::new(self.counter)
     }
 }
 

@@ -87,14 +87,12 @@ fn main() {
 
     }
 
-    let funs = state.funs;
-
     if opts.mode == cli::Mode::ShowIr {
         Diagnostic::debug("showing intermediate representation").emit();
         format_bytecode(&state.funs);
     }
 
-    match typecheck::typecheck(&funs) {
+    match typecheck::typecheck(&state.funs) {
         Ok(()) => (),
         Err(err) => {
             if opts.debug() {

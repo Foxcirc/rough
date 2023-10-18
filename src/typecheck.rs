@@ -1,9 +1,9 @@
 
 use std::{convert::identity, iter, collections::HashMap};
 
-use crate::{codegen::{InstrKind, BrLabel, FnLabel, Producer, Instr, Bytecode}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Instr, Bytecode}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
 
-pub(crate) fn typecheck<I: Intrinsic>(funs: HashMap<String, Bytecode<I>>) -> Result<(), TypeError> {
+pub(crate) fn typecheck<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>) -> Result<(), TypeError> {
 
     let main = match funs.get("main") {
         Some(val) => val,
@@ -29,13 +29,13 @@ fn eval_fn<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, stack: &mut Vec<Ty
 
     loop {
 
-        let instr = &funs[ip];
+        let instr = &body[ip];
 
         if &instr.kind == &end {
             return Ok(())
         }
 
-        match eval_instr(funs, stack, &mut ip, &instr.kind) {
+        match eval_instr(funs, body, stack, &mut ip, &instr.kind) {
             Ok(()) => (),
             Err(mut err) => {
                 err.file_span = FileSpan {
@@ -52,7 +52,7 @@ fn eval_fn<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, stack: &mut Vec<Ty
 
 }
 
-pub(crate) fn eval_instr<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec<Type>, ip: &mut usize, instr_kind: &InstrKind<I>) -> Result<(), TypeError> {
+pub(crate) fn eval_instr<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, body: &Bytecode<I>, stack: &mut Vec<Type>, ip: &mut usize, instr_kind: &InstrKind<I>) -> Result<(), TypeError> {
 
     match instr_kind {
 
@@ -61,21 +61,21 @@ pub(crate) fn eval_instr<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec
         },
 
         InstrKind::Call { to } => { // todo: use fn signature
-            let position = match find_fn_label(&bytecode, to) {
+            let body = match funs.get(to) {
                 Some(val) => val,
-                None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.inner.clone() }))
+                None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.to_string() }))
             };
-            let fun = &bytecode[position].kind;
-            if let InstrKind::FnLabel { label, signature } = fun {
-                let elems = split_signature_dynamic(stack, signature.takes.len());
-                for (lhs, rhs) in iter::zip(signature, &elems) {
-                    if Some(lhs) != rhs { return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: signature.takes.to_vec(), got: elems.into_iter().filter_map(identity).collect() })) }
-                }
-                stack.extend(signature.returns);
-            } else {
-                unreachable!()
-            }
-            // eval_fn(bytecode, stack, position, InstrKind::Return)?;
+            // let fun = &bytecode[position].kind;
+            // if let InstrKind::FnLabel { label, signature } = fun {
+            //     let elems = split_signature_dynamic(stack, signature.takes.len());
+            //     for (lhs, rhs) in iter::zip(signature, &elems) {
+            //         if Some(lhs) != rhs { return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: signature.takes.to_vec(), got: elems.into_iter().filter_map(identity).collect() })) }
+            //     }
+            //     stack.extend(signature.returns);
+            // } else {
+            //     unreachable!()
+            // }
+            eval_fn(funs, stack, body, 0, InstrKind::Return)?;
         },
         InstrKind::Return => (),
 
@@ -231,25 +231,25 @@ pub(crate) fn eval_instr<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec
             let got = split_signature::<1>(stack);
             verify_signature([Type::Bool], got)?;
 
-            let position = find_br_label(bytecode, to).expect("invalid br-label");
-            let else_bra = &bytecode[position - 1]; // the bra from the `else` should be there
+            let position = find_label(body, to).expect("invalid br-label");
+            let else_bra = &body[position - 1]; // the bra from the `else` should be there
 
             if let InstrKind::Bra { to: else_to } = &else_bra.kind {
                 // `if/else` block
                 let mut if_stack = stack.clone();
                 let mut else_stack = stack.clone();
-                eval_fn(bytecode, &mut if_stack, *ip + 1, InstrKind::BrLabel { label: *to, producer: Producer::If })?;
-                eval_fn(bytecode, &mut else_stack, position, InstrKind::BrLabel { label: *else_to, producer: Producer::Else })?;
+                eval_fn(funs, &mut if_stack, body, *ip + 1, InstrKind::Label { label: *to, producer: Producer::If })?;
+                eval_fn(funs, &mut else_stack, body, position, InstrKind::Label { label: *else_to, producer: Producer::Else })?;
                 if if_stack != else_stack {
                     return Err(TypeError::unspanned(TypeErrorKind::BranchesNotEqual));
                 }
                 *stack = if_stack;
-                let end_position = find_br_label(bytecode, else_to).expect("invalid br-label");
+                let end_position = find_label(body, else_to).expect("invalid br-label");
                 *ip = end_position; // remember: ip will be incremented again when we return here
             } else {
                 // `if` block
                 let mut if_stack = stack.clone();
-                eval_fn(bytecode, &mut if_stack, *ip + 1, InstrKind::BrLabel { label: *to, producer: Producer::If })?;
+                eval_fn(funs, &mut if_stack, body, *ip + 1, InstrKind::Label { label: *to, producer: Producer::If })?;
                 if stack != &mut if_stack {
                     return Err(TypeError::unspanned(TypeErrorKind::BranchesNotEmpty));
                 }
@@ -258,14 +258,14 @@ pub(crate) fn eval_instr<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec
 
         },
 
-        InstrKind::BrLabel { label, producer: Producer::Loop } => {
+        InstrKind::Label { label, producer: Producer::Loop } => {
 
             let mut loop_stack = stack.clone();
-            eval_fn(bytecode, &mut loop_stack, *ip + 1, InstrKind::Bra { to: *label })?;
+            eval_fn(funs, &mut loop_stack, body, *ip + 1, InstrKind::Bra { to: *label })?;
             if stack != &mut loop_stack {
                 return Err(TypeError::unspanned(TypeErrorKind::BranchesNotEmpty));
             }
-            let pos = bytecode.iter().position(|item| { // todo: wtf
+            let pos = body.iter().position(|item| { // todo: wtf
                 if let InstrKind::Bra { to: this } = &item.kind {
                     this == label
                 } else {
@@ -281,9 +281,7 @@ pub(crate) fn eval_instr<I: Intrinsic>(bytecode: &Vec<Instr<I>>, stack: &mut Vec
         },
 
         InstrKind::Bra { .. } => (),
-        InstrKind::FileStart { .. } => (),
-        InstrKind::FnLabel { .. } => (),
-        InstrKind::BrLabel { .. } => (),
+        InstrKind::Label { .. } => (),
 
     };
 
@@ -322,19 +320,9 @@ pub(crate) fn verify_signature<const N: usize>(want: [Type; N], got: [Option<Typ
     Ok(())
 }
 
-fn find_fn_label<I: Intrinsic>(bytecode: &Vec<Instr<I>>, target: &FnLabel) -> Option<usize> {
+fn find_label<I: Intrinsic>(bytecode: &Vec<Instr<I>>, target: &usize) -> Option<usize> {
     bytecode.iter().position(|item| {
-        if let InstrKind::FnLabel { label, .. } = &item.kind {
-            label == target
-        } else {
-            false
-        }
-    })
-}
-
-fn find_br_label<I: Intrinsic>(bytecode: &Vec<Instr<I>>, target: &BrLabel) -> Option<usize> {
-    bytecode.iter().position(|item| {
-        if let InstrKind::BrLabel { label, .. } = &item.kind {
+        if let InstrKind::Label { label, .. } = &item.kind {
             label == target
         } else {
             false
