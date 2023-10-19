@@ -92,7 +92,7 @@ fn main() {
         format_bytecode(&program.funs);
     }
 
-    match typecheck::typecheck(&program.funs) {
+    match typecheck::typecheck(&program) {
         Ok(()) => (),
         Err(err) => {
             if opts.debug() {

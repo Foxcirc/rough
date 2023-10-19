@@ -235,6 +235,7 @@ impl<I> Default for Program<I> {
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
+pub(crate) type BytecodeSlice<I> = [Instr<I>];
 
 #[derive(Debug, Default)]
 pub(crate) struct FileSpan {

@@ -6,9 +6,9 @@
 fn main {
     1 2 add
     3 eq if {
-        1
+        "YES"
     } else {
-        2
+        "NO"
     }
     ~
 }

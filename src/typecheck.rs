@@ -1,70 +1,103 @@
 
-use std::{convert::identity, iter, collections::HashMap};
+use std::{convert::identity, iter};
 
-use crate::{codegen::{InstrKind, Producer, Instr, Bytecode, FileSpan}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Program}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
 
-pub(crate) fn typecheck<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>) -> Result<(), TypeError> {
+struct TcState<'b, I> {
+    program: &'b Program<I>
+}
 
-    let main = match funs.get("main") {
-        Some(val) => val,
-        None => return Err(TypeError::unspanned(TypeErrorKind::MissingMain))
+struct BlockState<'b, I> {
+    pub body: &'b Bytecode<I>,
+    pub file_name: &'b str,
+    pub stack: Vec<Type>,
+    pub ip: usize,
+}
+
+impl<I> BlockState<'_, I> {
+    pub(crate) fn clone_and_reset_ip(&self) -> Self {
+        Self {
+            body: self.body,
+            file_name: self.file_name,
+            stack: Clone::clone(&self.stack),
+            ip: 0
+        }
+    }
+}
+
+pub(crate) fn typecheck<I: Intrinsic>(program: &Program<I>) -> Result<(), TypeError> {
+
+    let tc_state = TcState {
+        program
     };
 
-    let mut stack = Vec::new();
-    eval_fn(&funs, &mut stack, main, 0, InstrKind::Return)?;
-
-    if !stack.is_empty() {
-        return Err(TypeError::unspanned(TypeErrorKind::InvalidMain { got: stack }))
+    for fun in program.funs.values() {
+        typecheck_fun(&tc_state, fun)?;
     }
 
     Ok(())
 
 }
 
-fn eval_fn<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, stack: &mut Vec<Type>, body: &Bytecode<I>, start: usize, end: InstrKind<I>) -> Result<(), TypeError> {
+fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &Bytecode<I>) -> Result<(), TypeError> {
 
-    let file_name = "{unknown}"; // todo: make every function have a file name as associated
-    // metadata
-    let mut ip = start;
+    let mut state = BlockState {
+        body: fun,
+        file_name: "{unknown}",
+        stack: Vec::new(),
+        ip: 0,
+    };
 
-    loop {
+    // todo: push signature onto the stack
 
-        let instr = &body[ip];
+    typecheck_block(tc_state, &mut state, fun)?;
 
-        if &instr.kind == &end {
-            return Ok(())
-        }
+    // todo: actually verify signature
+    if !state.stack.is_empty() {
+        return Err(TypeError::unspanned(TypeErrorKind::InvalidMain { got: state.stack }))
+    }
 
-        match eval_instr(funs, body, stack, &mut ip, &instr.kind) {
+    Ok(())
+
+}
+
+fn typecheck_block<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockState<I>, block: &BytecodeSlice<I>) -> Result<(), TypeError> {
+
+    while let Some(instr) = block.get(block_state.ip) {
+
+        match typecheck_instr(tc_state, block_state, &instr.kind) {  
             Ok(()) => (),
             Err(mut err) => {
                 err.file_span = FileSpan {
                     span: instr.span,
-                    file: file_name.to_string(),
+                    file: block_state.file_name.to_string(),
                 };
                 return Err(err)
             }
-        };
+        }
 
-        ip += 1;
+        block_state.ip += 1;
 
     }
 
+    Ok(())
+
 }
 
-pub(crate) fn eval_instr<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, body: &Bytecode<I>, stack: &mut Vec<Type>, ip: &mut usize, instr_kind: &InstrKind<I>) -> Result<(), TypeError> {
+fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockState<I>, instr_kind: &InstrKind<I>) -> Result<(), TypeError> {
 
     match instr_kind {
 
         InstrKind::Push { value } => {
-            stack.push(literal_type(value))
+            block_state.stack.push(literal_type(value))
         },
 
         InstrKind::Call { to } => { // todo: use fn signature
-            let body = match funs.get(to) {
+            let inner = match tc_state.program.funs.get(to) {
                 Some(val) => val,
                 None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.to_string() }))
             };
+            todo!("typecheck signature");
             // let fun = &bytecode[position].kind;
             // if let InstrKind::FnLabel { label, signature } = fun {
             //     let elems = split_signature_dynamic(stack, signature.takes.len());
@@ -75,77 +108,77 @@ pub(crate) fn eval_instr<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, body
             // } else {
             //     unreachable!()
             // }
-            eval_fn(funs, stack, body, 0, InstrKind::Return)?;
         },
+
         InstrKind::Return => (),
 
         InstrKind::Drop => {
-            if let Some(val) = stack.pop() {
+            if let Some(val) = block_state.stack.pop() {
                 drop(val)
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any], got: stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Copy => {
-            if let Some(val) = stack.pop() {
-                stack.push(val.clone());
-                stack.push(val.clone());
+            if let Some(val) = block_state.stack.pop() {
+                block_state.stack.push(val.clone());
+                block_state.stack.push(val.clone());
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any], got: stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Over => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             if let [Some(first), Some(second)] = got {
-                stack.push(first.clone());
-                stack.push(second.clone());
-                stack.push(first.clone());
+                block_state.stack.push(first.clone());
+                block_state.stack.push(second.clone());
+                block_state.stack.push(first.clone());
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 2], got: stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 2], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Swap => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             if let [Some(first), Some(second)] = got {
-                stack.push(second);
-                stack.push(first);
+                block_state.stack.push(second);
+                block_state.stack.push(first);
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 2], got: stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 2], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Rot3 => {
-            let len = stack.len();
-            let elems = match stack.get_mut(len - 4..) {
+            let len = block_state.stack.len();
+            let elems = match block_state.stack.get_mut(len - 4..) {
                 Some(val) => val,
-                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 3], got: stack.to_vec() }))
+                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 3], got: block_state.stack.to_vec() }))
             };
             elems.rotate_left(1);
         },
         InstrKind::Rot4 => {
-            let len = stack.len();
-            let elems = match stack.get_mut(len - 5..) {
+            let len = block_state.stack.len();
+            let elems = match block_state.stack.get_mut(len - 5..) {
                 Some(val) => val,
-                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 4], got: stack.to_vec() }))
+                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 4], got: block_state.stack.to_vec() }))
             };
             elems.rotate_left(1);
         },
 
         InstrKind::Read => {
-            match stack.pop() {
+            match block_state.stack.pop() {
                 Some(Type::Ptr { inner }) => {
-                    stack.push(*inner);
+                    block_state.stack.push(*inner);
                 },
                 other => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(Type::Any) }], got: other.into_iter().collect() }))
             }
         },
         InstrKind::Write => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             match got { // todo: rewrtie thi
                 [Some(Type::Ptr { ref inner }), Some(ref value)] => {
                     if inner.as_ref() != value {
                         return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(value.clone()) }, Type::Any], got: got.into_iter().filter_map(identity).collect() }))
                     };
-                    stack.push(value.clone());
+                    block_state.stack.push(value.clone());
                 },
                 other => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(Type::Any) }, Type::Any], got: other.into_iter().filter_map(identity).collect() }))
             }
@@ -159,120 +192,116 @@ pub(crate) fn eval_instr<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, body
         // Access,
 
         InstrKind::Add => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Int);
+            block_state.stack.push(Type::Int);
         },
         InstrKind::Sub => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Int);
+            block_state.stack.push(Type::Int);
         },
         InstrKind::Mul => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Int);
+            block_state.stack.push(Type::Int);
         },
         InstrKind::Dvm => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Int);
+            block_state.stack.push(Type::Int);
         },
 
         InstrKind::Not => {
-            let got = split_signature::<1>(stack);
+            let got = split_signature::<1>(&mut block_state.stack);
             verify_signature([Type::Bool], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::And => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Bool, Type::Bool], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::Or  => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Bool, Type::Bool], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::Xor => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Bool, Type::Bool], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
                 
         InstrKind::Eq  => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::Gt  => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::Gte => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::Lt  => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
         InstrKind::Lte => {
-            let got = split_signature::<2>(stack);
+            let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            stack.push(Type::Bool);
+            block_state.stack.push(Type::Bool);
         },
 
         InstrKind::Bne { to } => {
 
-            let got = split_signature::<1>(stack);
+            let got = split_signature::<1>(&mut block_state.stack);
             verify_signature([Type::Bool], got)?;
 
-            let position = find_label(body, to).expect("invalid br-label");
-            let else_bra = &body[position - 1]; // the bra from the `else` should be there
+            let if_label = find_label(block_state.body, *to, Producer::If).expect("invalid br-label");
+            let else_bra = &block_state.body[if_label - 1]; // the bra from the `else` should be there
 
-            if let InstrKind::Bra { to: else_to } = &else_bra.kind {
+            if let InstrKind::Bra { to: else_to } = &else_bra.kind { // todo: harden check (producer == Else)
                 // `if/else` block
-                let mut if_stack = stack.clone();
-                let mut else_stack = stack.clone();
-                eval_fn(funs, &mut if_stack, body, *ip + 1, InstrKind::Label { label: *to, producer: Producer::If })?;
-                eval_fn(funs, &mut else_stack, body, position, InstrKind::Label { label: *else_to, producer: Producer::Else })?;
-                if if_stack != else_stack {
+                let else_label = find_label(block_state.body, *else_to, Producer::Else).expect("invalid br-label");
+                let mut if_state = block_state.clone_and_reset_ip();
+                let mut else_state = block_state.clone_and_reset_ip();
+                typecheck_block(tc_state, &mut if_state, &block_state.body[block_state.ip + 1 .. if_label])?;
+                typecheck_block(tc_state, &mut else_state, &block_state.body[if_label .. else_label])?;
+                if if_state.stack != else_state.stack {
                     return Err(TypeError::unspanned(TypeErrorKind::BranchesNotEqual));
                 }
-                *stack = if_stack;
-                let end_position = find_label(body, else_to).expect("invalid br-label");
-                *ip = end_position; // remember: ip will be incremented again when we return here
+                block_state.stack = if_state.stack;
+                let end_position = find_label(block_state.body, *else_to, Producer::Else).expect("invalid br-label");
+                block_state.ip = end_position; // remember: ip will be incremented again when we return here
             } else {
                 // `if` block
-                let mut if_stack = stack.clone();
-                eval_fn(funs, &mut if_stack, body, *ip + 1, InstrKind::Label { label: *to, producer: Producer::If })?;
-                if stack != &mut if_stack {
+                let mut if_state = block_state.clone_and_reset_ip();
+                typecheck_block(tc_state, &mut if_state, &block_state.body[block_state.ip + 1 .. if_label])?;
+                if block_state.stack != if_state.stack {
                     return Err(TypeError::unspanned(TypeErrorKind::BranchesNotEmpty));
                 }
-                *ip = position; // remember: ip will be incremented again when we return here
+                block_state.ip = if_label; // remember: ip will be incremented again when we return here
             }
 
         },
 
         InstrKind::Label { label, producer: Producer::Loop } => {
 
-            let mut loop_stack = stack.clone();
-            eval_fn(funs, &mut loop_stack, body, *ip + 1, InstrKind::Bra { to: *label })?;
-            if stack != &mut loop_stack {
+            let loop_bra = find_instr_kind(block_state.body, InstrKind::Bra { to: *label }).expect("cannot find loop-bra");
+
+            let mut loop_state = block_state.clone_and_reset_ip();
+            typecheck_block(tc_state, &mut loop_state, &block_state.body[block_state.ip + 1 .. loop_bra])?;
+            if block_state.stack != loop_state.stack {
                 return Err(TypeError::unspanned(TypeErrorKind::BranchesNotEmpty));
             }
-            let pos = body.iter().position(|item| { // todo: wtf
-                if let InstrKind::Bra { to: this } = &item.kind {
-                    this == label
-                } else {
-                    false
-                }
-            }).expect("invalid loop-bra");
-            *ip = pos; // remember: ip will be incremented again when we return here
+            block_state.ip = loop_bra; // remember: ip will be incremented again when we return here
 
         },
 
@@ -292,8 +321,8 @@ pub(crate) fn eval_instr<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, body
 pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Type>) -> [Option<Type>; N] {
     const NONE: Option<Type> = None;
     let mut res = [NONE; N];
-    let start = if vec.len() < N { vec.len() - 1 } else { vec.len() - N };
-    for (idx, item) in vec.drain(start..).rev().enumerate() {
+    let start = if vec.len() < N { vec.len() as isize - 1 } else { vec.len() as isize - N as isize };
+    for (idx, item) in vec.drain((start.max(0) as usize)..).rev().enumerate() {
         res[idx] = Some(item);
     }
     res
@@ -320,14 +349,12 @@ pub(crate) fn verify_signature<const N: usize>(want: [Type; N], got: [Option<Typ
     Ok(())
 }
 
-fn find_label<I: Intrinsic>(bytecode: &Vec<Instr<I>>, target: &usize) -> Option<usize> {
-    bytecode.iter().position(|item| {
-        if let InstrKind::Label { label, .. } = &item.kind {
-            label == target
-        } else {
-            false
-        }
-    })
+fn find_instr_kind<I: Intrinsic>(bytecode: &BytecodeSlice<I>, instr_kind: InstrKind<I>) -> Option<usize> {
+    bytecode.iter().position(|item| item.kind == instr_kind)
+}
+
+fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer: Producer) -> Option<usize> {
+    find_instr_kind(bytecode, InstrKind::Label { label, producer })
 }
 
 pub(crate) struct TypeError {
