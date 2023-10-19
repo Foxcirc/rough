@@ -1,22 +1,19 @@
 
 
 use std::{fmt, collections::HashMap};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr}, diagnostic::Diagnostic, parse_modules, arch::Intrinsic};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr}, diagnostic::Diagnostic, parse_modules::SourceFile, arch::Intrinsic};
 
-pub(crate) fn codegen<I: Intrinsic>(state: &mut Program<I>, source_file: parse_modules::SourceFile) -> Result<(), CodegenError> {
+pub(crate) fn codegen<I: Intrinsic>(program: &mut Program<I>, source_file: SourceFile) -> Result<(), CodegenError> {
 
     // let file_name = source_file.name().to_string();
 
     for fun in source_file.items.funs {
 
-        let mut bytecode = Bytecode::new();
-        let mut counter = 0;
+        let mut state = State::<I>::default();
+        codegen_block(&mut state, fun.body, None)?;
+        state.bytecode.push(Instr::spanned(InstrKind::Return, fun.span));
 
-        codegen_block(&mut bytecode, &mut counter, fun.body, None)?;
-
-        bytecode.push(Instr::spanned(InstrKind::Return, fun.span));
-
-        state.funs.insert(fun.name, bytecode);
+        program.funs.insert(fun.name, state.bytecode);
     
     }
 
@@ -24,13 +21,13 @@ pub(crate) fn codegen<I: Intrinsic>(state: &mut Program<I>, source_file: parse_m
 
 }
 
-fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, counter: &mut usize, block: Vec<Op>, loop_escape: Option<Label>) -> Result<(), CodegenError> {
+fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape: Option<Label>) -> Result<(), CodegenError> {
 
     for op in block {
 
         match op.kind {
 
-            OpKind::Push { value } => bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
+            OpKind::Push { value } => state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
 
             OpKind::Call { name }  => {
                 let inrinsic = I::generate(&name);
@@ -38,18 +35,18 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, counter: &mut usize, 
                     Some(val) => InstrKind::Intrinsic(val),
                     None => InstrKind::Call { to: name }
                 };
-                bytecode.push(Instr::spanned(result, op.span));
+                state.bytecode.push(Instr::spanned(result, op.span));
             },
 
-            OpKind::Copy  => bytecode.push(Instr::spanned(InstrKind::Copy, op.span)),
-            OpKind::Over  => bytecode.push(Instr::spanned(InstrKind::Over, op.span)),
-            OpKind::Swap  => bytecode.push(Instr::spanned(InstrKind::Swap, op.span)),
-            OpKind::Rot3  => bytecode.push(Instr::spanned(InstrKind::Rot3, op.span)),
-            OpKind::Rot4  => bytecode.push(Instr::spanned(InstrKind::Rot4, op.span)),
-            OpKind::Drop  => bytecode.push(Instr::spanned(InstrKind::Drop, op.span)),
+            OpKind::Copy  => state.bytecode.push(Instr::spanned(InstrKind::Copy, op.span)),
+            OpKind::Over  => state.bytecode.push(Instr::spanned(InstrKind::Over, op.span)),
+            OpKind::Swap  => state.bytecode.push(Instr::spanned(InstrKind::Swap, op.span)),
+            OpKind::Rot3  => state.bytecode.push(Instr::spanned(InstrKind::Rot3, op.span)),
+            OpKind::Rot4  => state.bytecode.push(Instr::spanned(InstrKind::Rot4, op.span)),
+            OpKind::Drop  => state.bytecode.push(Instr::spanned(InstrKind::Drop, op.span)),
 
-            OpKind::Read  => bytecode.push(Instr::spanned(InstrKind::Read,  op.span)),
-            OpKind::Write => bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
+            OpKind::Read  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)),
+            OpKind::Write => state.bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
 
             OpKind::Move  => todo!(),
             OpKind::Addr  => todo!(),
@@ -57,52 +54,52 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, counter: &mut usize, 
             OpKind::Size  => todo!(),
             OpKind::Dot   => todo!(),
 
-            OpKind::Add => bytecode.push(Instr::spanned(InstrKind::Add, op.span)),
-            OpKind::Sub => bytecode.push(Instr::spanned(InstrKind::Sub, op.span)),
-            OpKind::Mul => bytecode.push(Instr::spanned(InstrKind::Mul, op.span)),
-            OpKind::Dvm => bytecode.push(Instr::spanned(InstrKind::Dvm, op.span)),
+            OpKind::Add => state.bytecode.push(Instr::spanned(InstrKind::Add, op.span)),
+            OpKind::Sub => state.bytecode.push(Instr::spanned(InstrKind::Sub, op.span)),
+            OpKind::Mul => state.bytecode.push(Instr::spanned(InstrKind::Mul, op.span)),
+            OpKind::Dvm => state.bytecode.push(Instr::spanned(InstrKind::Dvm, op.span)),
 
-            OpKind::Not => bytecode.push(Instr::spanned(InstrKind::Not, op.span)),
-            OpKind::And => bytecode.push(Instr::spanned(InstrKind::And, op.span)),
-            OpKind::Or  => bytecode.push(Instr::spanned(InstrKind::Or,  op.span)),
-            OpKind::Xor => bytecode.push(Instr::spanned(InstrKind::Xor, op.span)),
+            OpKind::Not => state.bytecode.push(Instr::spanned(InstrKind::Not, op.span)),
+            OpKind::And => state.bytecode.push(Instr::spanned(InstrKind::And, op.span)),
+            OpKind::Or  => state.bytecode.push(Instr::spanned(InstrKind::Or,  op.span)),
+            OpKind::Xor => state.bytecode.push(Instr::spanned(InstrKind::Xor, op.span)),
 
-            OpKind::Eq  => bytecode.push(Instr::spanned(InstrKind::Eq,  op.span)),
-            OpKind::Gt  => bytecode.push(Instr::spanned(InstrKind::Gt,  op.span)),
-            OpKind::Gte => bytecode.push(Instr::spanned(InstrKind::Gte, op.span)),
-            OpKind::Lt  => bytecode.push(Instr::spanned(InstrKind::Lt,  op.span)),
-            OpKind::Lte => bytecode.push(Instr::spanned(InstrKind::Lte, op.span)),
+            OpKind::Eq  => state.bytecode.push(Instr::spanned(InstrKind::Eq,  op.span)),
+            OpKind::Gt  => state.bytecode.push(Instr::spanned(InstrKind::Gt,  op.span)),
+            OpKind::Gte => state.bytecode.push(Instr::spanned(InstrKind::Gte, op.span)),
+            OpKind::Lt  => state.bytecode.push(Instr::spanned(InstrKind::Lt,  op.span)),
+            OpKind::Lte => state.bytecode.push(Instr::spanned(InstrKind::Lte, op.span)),
 
             OpKind::If { block: if_block } => {
 
-                let end = next_label(counter);
-                bytecode.push(Instr::spanned(InstrKind::Bne { to: end }, op.span));
-                codegen_block(bytecode, counter, if_block, loop_escape)?;
-                bytecode.push(Instr::spanned(InstrKind::Label { label: end, producer: Producer::If }, op.span));
+                let end = state.next_label();
+                state.bytecode.push(Instr::spanned(InstrKind::Bne { to: end }, op.span));
+                codegen_block(state, if_block, loop_escape)?;
+                state.bytecode.push(Instr::spanned(InstrKind::Label { label: end, producer: Producer::If }, op.span));
 
             },
             OpKind::Elif { block: _block } => todo!(),
             OpKind::Else { block: else_block } => {
 
                 // check that this `else` is coming directly after an `if`
-                if !matches!(bytecode.last().map(|val| &val.kind), Some(InstrKind::Label { producer: Producer::If, .. })) {
+                if !matches!(state.bytecode.last().map(|val| &val.kind), Some(InstrKind::Label { producer: Producer::If, .. })) {
                     return Err(CodegenError::spanned(CodegenErrorKind::InvalidElse, op.span))
                 }
 
-                let end = next_label(counter);
-                bytecode.insert(bytecode.len() - 1, Instr::spanned(InstrKind::Bra { to: end }, op.span));
-                codegen_block(bytecode, counter, else_block, loop_escape)?;
-                bytecode.push(Instr::spanned(InstrKind::Label { label: end, producer: Producer::Else }, op.span));
+                let end = state.next_label();
+                state.bytecode.insert(state.bytecode.len() - 1, Instr::spanned(InstrKind::Bra { to: end }, op.span));
+                codegen_block(state, else_block, loop_escape)?;
+                state.bytecode.push(Instr::spanned(InstrKind::Label { label: end, producer: Producer::Else }, op.span));
 
             },
             OpKind::Loop { block: loop_block } => {
 
-                let start = next_label(counter);
-                let escape = next_label(counter);
-                bytecode.push(Instr::spanned(InstrKind::Label { label: start, producer: Producer::Loop }, op.span));
-                codegen_block(bytecode, counter, loop_block, Some(escape))?;
-                bytecode.push(Instr::spanned(InstrKind::Bra { to: start }, op.span));
-                bytecode.push(Instr::spanned(InstrKind::Label { label: escape, producer: Producer::Break }, op.span));
+                let start = state.next_label();
+                let escape = state.next_label();
+                state.bytecode.push(Instr::spanned(InstrKind::Label { label: start, producer: Producer::Loop }, op.span));
+                codegen_block(state, loop_block, Some(escape))?;
+                state.bytecode.push(Instr::spanned(InstrKind::Bra { to: start }, op.span));
+                state.bytecode.push(Instr::spanned(InstrKind::Label { label: escape, producer: Producer::Break }, op.span));
 
             },
             OpKind::For  { block: _block } => todo!(),
@@ -112,7 +109,7 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, counter: &mut usize, 
                     Some(val) => val,
                     None => return Err(CodegenError::spanned(CodegenErrorKind::InvalidBreak, op.span)),
                 };
-                bytecode.push(Instr::spanned(InstrKind::Bra { to: escape }, op.span))
+                state.bytecode.push(Instr::spanned(InstrKind::Bra { to: escape }, op.span))
 
             },
         };
@@ -121,11 +118,6 @@ fn codegen_block<I: Intrinsic>(bytecode: &mut Bytecode<I>, counter: &mut usize, 
 
     Ok(())
 
-}
-
-fn next_label(counter: &mut usize) -> usize {
-    *counter += 1;
-    *counter
 }
 
 #[derive(PartialEq, Eq)]
@@ -243,6 +235,12 @@ impl<I> Default for Program<I> {
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
+
+#[derive(Debug, Default)]
+pub(crate) struct FileSpan {
+    pub span: Span,
+    pub file: String,
+}
 
 pub(crate) struct CodegenError {
     pub(crate) kind: CodegenErrorKind,

@@ -1,7 +1,7 @@
 
 use std::{convert::identity, iter, collections::HashMap};
 
-use crate::{codegen::{InstrKind, Producer, Instr, Bytecode}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Instr, Bytecode, FileSpan}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
 
 pub(crate) fn typecheck<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>) -> Result<(), TypeError> {
 
@@ -271,7 +271,7 @@ pub(crate) fn eval_instr<I: Intrinsic>(funs: &HashMap<String, Bytecode<I>>, body
                 } else {
                     false
                 }
-            }).expect("loop bra not found");
+            }).expect("invalid loop-bra");
             *ip = pos; // remember: ip will be incremented again when we return here
 
         },
@@ -328,18 +328,6 @@ fn find_label<I: Intrinsic>(bytecode: &Vec<Instr<I>>, target: &usize) -> Option<
             false
         }
     })
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct FileSpan {
-    span: Span,
-    file: String,
-}
-
-impl FileSpan {
-    pub(crate) fn new(span: Span, file: &str) -> Self {
-        Self { span, file: file.to_string() }
-    }
 }
 
 pub(crate) struct TypeError {
