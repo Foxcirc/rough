@@ -13,7 +13,7 @@ fn main {
     ~
 }
 
-fn add-intrinsic: int int - int {
+fn add-intrinsic: int<int> int - int {
     add
 }
 

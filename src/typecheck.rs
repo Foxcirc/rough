@@ -1,29 +1,7 @@
 
 use std::{convert::identity, iter};
 
-use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Program}, parser::{Type, literal_type, Span}, arch::Intrinsic, diagnostic::Diagnostic};
-
-struct TcState<'b, I> {
-    program: &'b Program<I>
-}
-
-struct BlockState<'b, I> {
-    pub body: &'b Bytecode<I>,
-    pub file_name: &'b str,
-    pub stack: Vec<Type>,
-    pub ip: usize,
-}
-
-impl<I> BlockState<'_, I> {
-    pub(crate) fn clone_and_reset_ip(&self) -> Self {
-        Self {
-            body: self.body,
-            file_name: self.file_name,
-            stack: Clone::clone(&self.stack),
-            ip: 0
-        }
-    }
-}
+use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Program, FunWithMetadata}, parser::{Type, literal_type, Span, Signature, ParsedSignature, TypeLiteral}, arch::Intrinsic, diagnostic::Diagnostic};
 
 pub(crate) fn typecheck<I: Intrinsic>(program: &Program<I>) -> Result<(), TypeError> {
 
@@ -32,32 +10,52 @@ pub(crate) fn typecheck<I: Intrinsic>(program: &Program<I>) -> Result<(), TypeEr
     };
 
     for fun in program.funs.values() {
-        typecheck_fun(&tc_state, fun)?;
+        typecheck_fun(&tc_state, &fun)?;
     }
 
     Ok(())
 
 }
 
-fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &Bytecode<I>) -> Result<(), TypeError> {
+fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I>) -> Result<(), TypeError> {
 
     let mut state = BlockState {
-        body: fun,
-        file_name: "{unknown}",
+        body: &fun.body,
+        file_name: &fun.file_name,
         stack: Vec::new(),
         ip: 0,
     };
 
     // todo: push signature onto the stack
 
-    typecheck_block(tc_state, &mut state, fun)?;
+    let takes = translate_type_lit(&fun.signature.takes)?;
+    state.stack.extend(takes);
+
+    typecheck_block(tc_state, &mut state, &fun.body)?;
 
     // todo: actually verify signature
-    if !state.stack.is_empty() {
-        return Err(TypeError::unspanned(TypeErrorKind::InvalidMain { got: state.stack }))
+
+    let returns = translate_type_lit(&fun.signature.returns)?;
+    if state.stack != returns {
+        return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: returns, got: state.stack }))
     }
 
     Ok(())
+
+}
+
+fn translate_type_lit(types: &Vec<TypeLiteral>) -> Result<Vec<Type>, TypeError> {
+
+    let mut result = Vec::new();
+
+    for item in types {
+        match &item.name[..] {
+            "int" => result.push(Type::Int),
+            other => todo!("invalid type literal in signature: {}", other),
+        }
+    }
+
+    Ok(result)
 
 }
 
@@ -318,6 +316,28 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
 
 }
 
+struct TcState<'b, I> {
+    program: &'b Program<I>
+}
+
+struct BlockState<'b, I> {
+    pub body: &'b Bytecode<I>,
+    pub file_name: &'b str,
+    pub stack: Vec<Type>,
+    pub ip: usize,
+}
+
+impl<I> BlockState<'_, I> {
+    pub(crate) fn clone_and_reset_ip(&self) -> Self {
+        Self {
+            body: self.body,
+            file_name: self.file_name,
+            stack: Clone::clone(&self.stack),
+            ip: 0
+        }
+    }
+}
+
 pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Type>) -> [Option<Type>; N] {
     const NONE: Option<Type> = None;
     let mut res = [NONE; N];
@@ -369,8 +389,6 @@ impl TypeError {
 }
 
 pub(crate) enum TypeErrorKind {
-    MissingMain,
-    InvalidMain { got: Vec<Type> },
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
@@ -379,8 +397,6 @@ pub(crate) enum TypeErrorKind {
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
     let diag = match &value.kind {
-        TypeErrorKind::MissingMain => Diagnostic::error("missing `main` function"),
-        TypeErrorKind::InvalidMain { got } => Diagnostic::error("invalid `main` function").note(format!("got {:?}", got)),
         TypeErrorKind::UnknownFn { name } => Diagnostic::error("unknown function").code(name),
         TypeErrorKind::BranchesNotEmpty => {
             Diagnostic::error("branch changes stack")

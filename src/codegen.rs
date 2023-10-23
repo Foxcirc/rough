@@ -1,19 +1,23 @@
 
 
-use std::{fmt, collections::HashMap};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr}, diagnostic::Diagnostic, parse_modules::SourceFile, arch::Intrinsic};
+use std::{fmt, collections::HashMap, path::{Path, PathBuf}, borrow::Cow};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, ParsedSignature, FnSignature, Signature, FunDef}, diagnostic::Diagnostic, parse_modules::SourceFile, arch::Intrinsic};
 
-pub(crate) fn codegen<I: Intrinsic>(program: &mut Program<I>, source_file: SourceFile) -> Result<(), CodegenError> {
+pub(crate) fn codegen<I: Intrinsic>(program: &mut Program<I>, file_path: &PathBuf, funs: Vec<FunDef>) -> Result<(), CodegenError> {
 
-    // let file_name = source_file.name().to_string();
-
-    for fun in source_file.items.funs {
+    for fun in funs.into_iter() {
 
         let mut state = State::<I>::default();
         codegen_block(&mut state, fun.body, None)?;
         state.bytecode.push(Instr::spanned(InstrKind::Return, fun.span));
 
-        program.funs.insert(fun.name, state.bytecode);
+        let result = FunWithMetadata {
+            file_name: file_path.to_string_lossy().to_string(), // todo: rename all "human-only" things to smth like human_file_name
+            signature: fun.signature,
+            body: state.bytecode,
+        };
+
+        program.funs.insert(fun.name, result);
     
     }
 
@@ -223,19 +227,28 @@ impl<I> State<I> {
 }
 
 pub(crate) struct Program<I> {
-    pub funs: HashMap<IdentStr, Bytecode<I>>,
+    pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
+    pub types: HashMap<Cow<'static, str>, Type>,
 }
 
 impl<I> Default for Program<I> {
     fn default() -> Self {
         Self {
             funs: HashMap::new(),
+            types: HashMap::new(),
         }
     }
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
 pub(crate) type BytecodeSlice<I> = [Instr<I>];
+
+#[derive(Debug, Default)]
+pub(crate) struct FunWithMetadata<I> {
+    pub file_name: String,
+    pub signature: ParsedSignature,
+    pub body: Bytecode<I>,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct FileSpan {

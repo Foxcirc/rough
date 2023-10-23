@@ -4,11 +4,12 @@ pub(crate) mod test;
 
 pub mod parser;
 pub mod codegen;
+pub mod typegen;
 pub mod typecheck;
 pub mod diagnostic;
 
 use std::{env, time, collections::HashMap, fmt};
-use codegen::Bytecode;
+use codegen::{Bytecode, FunWithMetadata};
 use diagnostic::Diagnostic;
 use parser::IdentStr;
 
@@ -52,7 +53,7 @@ fn main() {
         },
     };
 
-    let source_files = parse_modules::source_files(state);
+    let source_files = state.source_files;
 
     if opts.debug() {
         let files: Vec<_> = source_files.iter().map(|item| item.name()).collect();
@@ -72,7 +73,20 @@ fn main() {
 
         let name = source_file.name().to_string();
 
-        match codegen::codegen::<arch::Intel64>(&mut program, source_file) { // todo: add debug timings for codegen
+        match typegen::typegen::<arch::Intel64>(&mut program, &source_file.path, source_file.items.types) {
+            Ok(()) => (),
+            Err(err) => {
+                if opts.debug() {
+                    Diagnostic::debug("typegen failed").emit();
+                }
+                typegen::format_error(err)
+                    .file(name)
+                    .emit();
+                return
+            }
+        };
+
+        match codegen::codegen::<arch::Intel64>(&mut program, &source_file.path, source_file.items.funs) { // todo: add debug timings for codegen
             Ok(()) => (),
             Err(err) => {
                 if opts.debug() {
@@ -148,10 +162,10 @@ pub(crate) mod arch {
 
 }
 
-fn format_bytecode<I: fmt::Debug>(funs: &HashMap<IdentStr, Bytecode<I>>) {
-    for (name, bytecode) in funs.iter() {
-        eprintln!("fn {}:", name);
-        for (idx, instruction) in bytecode.iter().enumerate() {
+fn format_bytecode<I: fmt::Debug>(funs: &HashMap<IdentStr, FunWithMetadata<I>>) {
+    for (name, fun) in funs.iter() {
+        eprintln!("fn {} (file {}):", name, fun.file_name);
+        for (idx, instruction) in fun.body.iter().enumerate() {
             eprintln!("{:3}: {:?}", idx, instruction);
         }
     }
@@ -237,12 +251,14 @@ pub(crate) mod parse_modules {
         pub(crate) items: ModuleTranslationUnit
     }
 
-    pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>;
+    // todo: why is TranslationUnit generic over U??
+    pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>; // todo:
+    // rename "parser::Use" to something more meaningful
 
     impl SourceFile {
         pub(crate) fn name(&self) -> &str {
             self.path.file_name()
-                .unwrap_or(&OsStr::new("unknown"))
+                .unwrap_or(&OsStr::new("{unknown}"))
                 .to_str()
                 .expect("file name not valid utf8")
         }

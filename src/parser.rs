@@ -1,5 +1,5 @@
 
-use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
+use nom::{branch::alt, multi::{many0, many1, fold_many0, separated_list1}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
 use nom_locate::LocatedSpan;
 use crate::diagnostic;
 
@@ -18,8 +18,8 @@ fn assign_item<'a>(mut dest: ParseTranslationUnit, item: Item) -> ParseTranslati
     match item {
         Item::Comment   => (),
         Item::Use(val)  => dest.uses.push(val),
-        Item::Fun(val)  => dest.funs.push(val),
-        Item::Type(val) => dest.types.push(val),
+        Item::FunDef(val)  => dest.funs.push(val),
+        Item::TypeDef(val) => dest.types.push(val),
     }
     dest
 }
@@ -28,8 +28,8 @@ pub(crate) fn parse_item(dat: ParseInput) ->  ParseResult<Item> {
     alt((
         parse_comment,
         preceded(tag("use"),  cut(parse_use)),
-        preceded(tag("fn"),   cut(parse_fun)),
-        preceded(tag("type"), cut(parse_type)),
+        preceded(tag("fn"),   cut(parse_fun_def)),
+        preceded(tag("type"), cut(parse_type_def)),
     ))(dat)
 }
 
@@ -47,35 +47,45 @@ pub(crate) fn parse_use(dat: ParseInput) -> ParseResult<Item> {
     )(dat)
 }
 
-pub(crate) fn parse_fun(dat: ParseInput) -> ParseResult<Item> {
+pub(crate) fn parse_fun_def(dat: ParseInput) -> ParseResult<Item> {
     map(
         tuple((
             preceded(multispace0, parse_ident),
             preceded(multispace0, opt(parse_signature)),
             preceded(multispace0, parse_block),
         )),
-        |(name, signature, block)| Item::Fun(Fun { name, signature: signature.unwrap_or_default(), body: block, span: Span::from_located_span(&dat) })
+        |(name, signature, block)| Item::FunDef(FunDef { name, signature: signature.unwrap_or_default(), body: block, span: Span::from_located_span(&dat) })
     )(dat)
 }
 
-pub(crate) fn parse_type(dat: ParseInput) -> ParseResult<Item> {
+pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
     map(
         tuple((
             preceded(multispace0, cut(parse_ident)),
         )),
-        |_| Item::Type(Type::Int)
+        |_| Item::TypeDef(Type::Int)
     )(dat)
 }
 
-pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Signature<IdentStr>> {
+pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Signature<TypeLiteral>> {
     map(
         tuple((
             preceded(multispace0, char(':')),
-            many0(preceded(multispace0, parse_ident)),
+            many0(preceded(multispace0, parse_type_lit)),
             preceded(multispace0, opt(char('-'))),
-            many0(preceded(multispace0, parse_ident)),
+            many0(preceded(multispace0, parse_type_lit)),
         )),
         |(_, takes, _, returns)| Signature { takes, returns }
+    )(dat)
+}
+
+pub(crate) fn parse_type_lit(dat: ParseInput) -> ParseResult<TypeLiteral> {
+    map(
+        pair(
+            parse_ident,
+            opt(delimited(char('<'), separated_list1(char(','), parse_type_lit), char('>')))
+        ),
+        |(name, maybe_types)| TypeLiteral { name, types: maybe_types.unwrap_or_default() }
     )(dat)
 }
 
@@ -93,7 +103,7 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
             alt((
                 value(OpKind::Copy,  char('*')),
                 value(OpKind::Over,  char('+')),
-                value(OpKind::Swap,  terminated(char('-'),   multispace1)), // could also be the start of an ident
+                value(OpKind::Swap,  char('-')),
                 value(OpKind::Rot3,  terminated(tag("rot3"), multispace1)),
                 value(OpKind::Rot4,  terminated(tag("rot4"), multispace1)),
                 value(OpKind::Drop,  char('~')),
@@ -121,11 +131,11 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
                 value(OpKind::Lte, terminated(tag("lte"), multispace1)),
             )),
             alt((
-                map(preceded(pair(tag("if"),   multispace0), cut(parse_block)), |block| OpKind::If   { block }),
-                map(preceded(pair(tag("elif"), multispace0), cut(parse_block)), |block| OpKind::Elif { block }),
-                map(preceded(pair(tag("else"), multispace0), cut(parse_block)), |block| OpKind::Else { block }),
-                map(preceded(pair(tag("loop"), multispace0), cut(parse_block)), |block| OpKind::Loop { block }),
-                map(preceded(pair(tag("for"),  multispace0), cut(parse_block)), |block| OpKind::For  { block }),
+                map(preceded(pair(tag("if"),   multispace1), cut(parse_block)), |block| OpKind::If   { block }),
+                map(preceded(pair(tag("elif"), multispace1), cut(parse_block)), |block| OpKind::Elif { block }),
+                map(preceded(pair(tag("else"), multispace1), cut(parse_block)), |block| OpKind::Else { block }),
+                map(preceded(pair(tag("loop"), multispace1), cut(parse_block)), |block| OpKind::Loop { block }),
+                map(preceded(pair(tag("for"),  multispace1), cut(parse_block)), |block| OpKind::For  { block }),
                 value(OpKind::Break, tag("break")),
             )),
             alt((
@@ -176,7 +186,7 @@ pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
 pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<IdentStr> {
     map(
         context("identifier cannot be a keyword", verify(
-            context("expected identifier", recognize(pair(alt((alpha1, tag("-"))), many0(alt((alphanumeric1, tag("-"))))))),
+            context("expected identifier", recognize(pair(alpha1, many0(alt((alphanumeric1, tag("-"))))))),
             |ident: &ParseInput| !matches!(ident.into_fragment(), "fn" | "type" | "if" | "elif" | "else" | "loop" | "for" | "break" | "true" | "false")
         )),
         to_identstr
@@ -254,7 +264,7 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
 #[derive(Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct TranslationUnit<U> { // todo: dont use generics here :/
     pub uses: U,
-    pub funs: Vec<Fun>,
+    pub funs: Vec<FunDef>,
     pub types: Vec<Type>,
 }
 
@@ -265,8 +275,8 @@ pub(crate) type Block = Vec<Op>;
 pub(crate) enum Item {
     Comment,
     Use(Use),
-    Fun(Fun),
-    Type(Type),
+    FunDef(FunDef),
+    TypeDef(Type),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -275,7 +285,7 @@ pub(crate) struct Use {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Fun {
+pub(crate) struct FunDef {
     pub name: IdentStr,
     pub span: Span,
     pub signature: ParsedSignature,
@@ -297,7 +307,7 @@ impl<I> Default for Signature<I> {
     }
 }
 
-pub(crate) type ParsedSignature = Signature<IdentStr>;
+pub(crate) type ParsedSignature = Signature<TypeLiteral>;
 pub(crate) type FnSignature = Signature<Type>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -386,6 +396,12 @@ pub(crate) enum Literal {
     Int(u64),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)] // todo: what derives are needed
+pub(crate) struct TypeLiteral {
+    pub name: IdentStr,
+    pub types: Vec<TypeLiteral>,
 }
 
 pub(crate) fn literal_type(literal: &Literal) -> Type {
