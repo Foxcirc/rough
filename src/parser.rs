@@ -1,5 +1,5 @@
 
-use nom::{branch::alt, multi::{many0, many1, fold_many0, separated_list1}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
+use nom::{branch::alt, multi::{many0, many1, fold_many0, separated_list1}, sequence::{pair, delimited, preceded, terminated, tuple, separated_pair}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
 use nom_locate::LocatedSpan;
 use crate::diagnostic;
 
@@ -67,15 +67,18 @@ pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
     )(dat)
 }
 
-pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Signature<TypeLiteral>> {
+pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<ParsedSignature> {
     map(
-        tuple((
-            preceded(multispace0, char(':')),
-            many0(preceded(multispace0, parse_type_lit)),
-            preceded(multispace0, opt(char('-'))),
-            many0(preceded(multispace0, parse_type_lit)),
-        )),
-        |(_, takes, _, returns)| Signature { takes, returns }
+        delimited(
+            char('('),
+            separated_pair(
+                many0(preceded(multispace0, parse_type_lit)),
+                opt(preceded(multispace0, tag("->"))),
+                many0(preceded(multispace0, parse_type_lit))
+            ),
+            char(')')
+        ),
+        |(takes, returns)| Signature { takes, returns }
     )(dat)
 }
 
@@ -83,7 +86,7 @@ pub(crate) fn parse_type_lit(dat: ParseInput) -> ParseResult<TypeLiteral> {
     map(
         pair(
             parse_ident,
-            opt(delimited(char('<'), separated_list1(char(','), parse_type_lit), char('>')))
+            opt(delimited(char('<'), cut(many1(terminated(parse_type_lit, multispace0))), char('>')))
         ),
         |(name, maybe_types)| TypeLiteral { name, types: maybe_types.unwrap_or_default() }
     )(dat)

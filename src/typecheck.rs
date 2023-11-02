@@ -90,22 +90,23 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
             block_state.stack.push(literal_type(value))
         },
 
-        InstrKind::Call { to } => { // todo: use fn signature
+        InstrKind::Call { to } => {
             let inner = match tc_state.program.funs.get(to) {
                 Some(val) => val,
                 None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.to_string() }))
             };
-            todo!("typecheck signature");
-            // let fun = &bytecode[position].kind;
-            // if let InstrKind::FnLabel { label, signature } = fun {
-            //     let elems = split_signature_dynamic(stack, signature.takes.len());
-            //     for (lhs, rhs) in iter::zip(signature, &elems) {
-            //         if Some(lhs) != rhs { return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: signature.takes.to_vec(), got: elems.into_iter().filter_map(identity).collect() })) }
-            //     }
-            //     stack.extend(signature.returns);
-            // } else {
-            //     unreachable!()
-            // }
+            let takes = translate_type_lit(&inner.signature.takes)?;
+            let returns = translate_type_lit(&inner.signature.returns)?;
+            let elems = split_signature_dynamic(&mut block_state.stack, takes.len());
+            for (lhs, rhs) in iter::zip(&takes, &elems) {
+                if Some(lhs) != rhs.as_ref() {
+                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch {
+                        want: takes,
+                        got: elems.into_iter().filter_map(identity).collect()
+                    }))
+                }
+            }
+            block_state.stack.extend(returns);
         },
 
         InstrKind::Return => (),
@@ -171,14 +172,13 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
         },
         InstrKind::Write => {
             let got = split_signature::<2>(&mut block_state.stack);
-            match got { // todo: rewrtie thi
-                [Some(Type::Ptr { ref inner }), Some(ref value)] => {
-                    if inner.as_ref() != value {
-                        return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(value.clone()) }, Type::Any], got: got.into_iter().filter_map(identity).collect() }))
-                    };
-                    block_state.stack.push(value.clone());
-                },
-                other => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(Type::Any) }, Type::Any], got: other.into_iter().filter_map(identity).collect() }))
+            if let [Some(Type::Ptr { ref inner }), Some(ref value)] = got {
+                if inner.as_ref() != value {
+                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(value.clone()) }, Type::Any], got: got.into_iter().filter_map(identity).collect() }))
+                };
+                block_state.stack.push(value.clone());
+            } else {
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(Type::Any) }, Type::Any], got: got.into_iter().filter_map(identity).collect() }))
             }
         },
         // Move,
@@ -397,7 +397,7 @@ pub(crate) enum TypeErrorKind {
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
     let diag = match &value.kind {
-        TypeErrorKind::UnknownFn { name } => Diagnostic::error("unknown function").code(name),
+        TypeErrorKind::UnknownFn { name } => Diagnostic::error("unknown word").code(name),
         TypeErrorKind::BranchesNotEmpty => {
             Diagnostic::error("branch changes stack")
                 .note("this branch may not change the types on the stack")

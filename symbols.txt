@@ -1,8 +1,8 @@
 
 Symbols:
 
-> ptr-read
-< ptr-write
+> type parameters
+< type parameters
 - swap
 + over
 * copy
@@ -17,7 +17,7 @@ $ ???
 : ???
 . access
 
-() stack scope
+() fn signature
 {} code scope
 [] ???
 

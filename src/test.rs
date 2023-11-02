@@ -27,7 +27,7 @@ fn scnd<A, B>(tuple: (A, B)) -> B {
 #[test]
 fn full_parse() {
 
-    let code = fs::read_to_string("src/test/parser.rh").expect("Cannot not read file");
+    let code = fs::read_to_string("src/test/main.rh").expect("Cannot not read file");
 
     let result = parser::parse(&code);
 

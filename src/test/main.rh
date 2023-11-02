@@ -1,10 +1,10 @@
 
 // library pthread {
-//     fn create-thread: int int - int
+//     fn create-thread (ptr<int> int -> int)
 // }
 
 fn main {
-    1 2 add
+    1 2 add-intrinsic
     3 eq if {
         "YES"
     } else {
@@ -13,7 +13,25 @@ fn main {
     ~
 }
 
-fn add-intrinsic: int<int> int - int {
+fn add-intrinsic (int int -> int) {
     add
 }
+
+// fn foo-array (-> array<int 4>) {
+//     0 4 array:from-default
+//     1 2 3 4 array:from-4
+//     1 2 3 4 4 array:from-n
+// }
+// 
+// fn foo-slice (-> slice<int>) {
+//     foo-array
+//     slice:from-array
+//     ptr:null 10 slice:from-parts
+//     0 4 list:from-default
+// }
+// 
+// fn foo-tuple (-> tuple<int bool>) {
+//     42 true tuple:from-2
+//     42 true 2 tuple:from-n
+// }
 
