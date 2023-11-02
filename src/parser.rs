@@ -407,14 +407,6 @@ pub(crate) struct TypeLiteral {
     pub types: Vec<TypeLiteral>,
 }
 
-pub(crate) fn literal_type(literal: &Literal) -> Type {
-    match literal {
-        Literal::Int(..)  => Type::Int,
-        Literal::Bool(..) => Type::Bool,
-        Literal::Str(..)  => Type::Ptr { inner: Box::new(Type::Char) }
-    }
-}
-
 pub(crate) type IdentStr = String;
 
 fn to_identstr(value: ParseInput) -> String {

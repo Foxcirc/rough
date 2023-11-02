@@ -1,6 +1,6 @@
 
 use std::fs;
-use crate::{parser::{self, Type}, typecheck};
+use crate::{parser::{self, Type}, typecheck::{self, Entity}};
 
 fn scnd<A, B>(tuple: (A, B)) -> B {
     tuple.1
@@ -42,8 +42,8 @@ fn full_parse() {
 #[test]
 fn tc_helper_fns() {
 
-    const INT: Type = Type::Int;
-    const BOOL: Type = Type::Bool;
+    const INT: Entity = Entity::runtime(Type::Int);
+    const BOOL: Entity = Entity::runtime(Type::Bool);
 
     let mut foo = vec![INT, INT, BOOL, BOOL];
     let bar = typecheck::split_signature::<2>(&mut foo);

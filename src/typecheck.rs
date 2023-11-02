@@ -1,7 +1,7 @@
 
 use std::{convert::identity, iter};
 
-use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Program, FunWithMetadata}, parser::{Type, literal_type, Span, Signature, ParsedSignature, TypeLiteral}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Program, FunWithMetadata}, parser::{Type, Span, Signature, ParsedSignature, TypeLiteral, Literal}, arch::Intrinsic, diagnostic::Diagnostic};
 
 pub(crate) fn typecheck<I: Intrinsic>(program: &Program<I>) -> Result<(), TypeError> {
 
@@ -44,13 +44,13 @@ fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I>) 
 
 }
 
-fn translate_type_lit(types: &Vec<TypeLiteral>) -> Result<Vec<Type>, TypeError> {
+fn translate_type_lit(types: &Vec<TypeLiteral>) -> Result<Vec<Entity>, TypeError> {
 
     let mut result = Vec::new();
 
     for item in types {
         match &item.name[..] {
-            "int" => result.push(Type::Int),
+            "int" => result.push(Entity::runtime(Type::Int)),
             other => todo!("invalid type literal in signature: {}", other),
         }
     }
@@ -87,7 +87,7 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
     match instr_kind {
 
         InstrKind::Push { value } => {
-            block_state.stack.push(literal_type(value))
+            block_state.stack.push(literal_type(value.clone())) // :(
         },
 
         InstrKind::Call { to } => {
@@ -115,7 +115,7 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
             if let Some(val) = block_state.stack.pop() {
                 drop(val)
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any], got: block_state.stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Copy => {
@@ -123,7 +123,7 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
                 block_state.stack.push(val.clone());
                 block_state.stack.push(val.clone());
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any], got: block_state.stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Over => {
@@ -133,7 +133,7 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
                 block_state.stack.push(second.clone());
                 block_state.stack.push(first.clone());
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 2], got: block_state.stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type(); 2], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Swap => {
@@ -142,14 +142,14 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
                 block_state.stack.push(second);
                 block_state.stack.push(first);
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 2], got: block_state.stack.to_vec() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type(); 2], got: block_state.stack.to_vec() }))
             }
         },
         InstrKind::Rot3 => {
             let len = block_state.stack.len();
             let elems = match block_state.stack.get_mut(len - 4..) {
                 Some(val) => val,
-                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 3], got: block_state.stack.to_vec() }))
+                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type(); 3], got: block_state.stack.to_vec() }))
             };
             elems.rotate_left(1);
         },
@@ -157,28 +157,29 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
             let len = block_state.stack.len();
             let elems = match block_state.stack.get_mut(len - 5..) {
                 Some(val) => val,
-                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Any; 4], got: block_state.stack.to_vec() }))
+                None => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type(); 4], got: block_state.stack.to_vec() }))
             };
             elems.rotate_left(1);
         },
 
         InstrKind::Read => {
             match block_state.stack.pop() {
-                Some(Type::Ptr { inner }) => {
-                    block_state.stack.push(*inner);
+                Some(Entity { t: Type::Ptr { inner }, .. }) => {
+                    block_state.stack.push(Entity::runtime(*inner));
                 },
-                other => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(Type::Any) }], got: other.into_iter().collect() }))
+                other => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::runtime(Type::Ptr { inner: Box::new(Type::Any) })], got: other.into_iter().collect() }))
             }
         },
         InstrKind::Write => {
+            // todo: fuckin rewrite this shit
             let got = split_signature::<2>(&mut block_state.stack);
-            if let [Some(Type::Ptr { ref inner }), Some(ref value)] = got {
-                if inner.as_ref() != value {
-                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(value.clone()) }, Type::Any], got: got.into_iter().filter_map(identity).collect() }))
+            if let [Some(ref value), Some(Entity { t: Type::Ptr { ref inner }, .. })] = got {
+                if inner.as_ref() != &value.t {
+                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::runtime(Type::Ptr { inner: Box::new(value.t.clone()) }), Entity::any_type()], got: got.into_iter().filter_map(identity).collect() }))
                 };
                 block_state.stack.push(value.clone());
             } else {
-                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Type::Ptr { inner: Box::new(Type::Any) }, Type::Any], got: got.into_iter().filter_map(identity).collect() }))
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::runtime(Type::Ptr { inner: Box::new(Type::Any) }), Entity::any_type()], got: got.into_iter().filter_map(identity).collect() }))
             }
         },
         // Move,
@@ -192,69 +193,69 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
         InstrKind::Add => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Int);
+            block_state.stack.push(Entity::runtime(Type::Int));
         },
         InstrKind::Sub => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Int);
+            block_state.stack.push(Entity::runtime(Type::Int));
         },
         InstrKind::Mul => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Int);
+            block_state.stack.push(Entity::runtime(Type::Int));
         },
         InstrKind::Dvm => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Int);
+            block_state.stack.push(Entity::runtime(Type::Int));
         },
 
         InstrKind::Not => {
             let got = split_signature::<1>(&mut block_state.stack);
             verify_signature([Type::Bool], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::And => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Bool, Type::Bool], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::Or  => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Bool, Type::Bool], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::Xor => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Bool, Type::Bool], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
                 
         InstrKind::Eq  => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::Gt  => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::Gte => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::Lt  => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
         InstrKind::Lte => {
             let got = split_signature::<2>(&mut block_state.stack);
             verify_signature([Type::Int, Type::Int], got)?;
-            block_state.stack.push(Type::Bool);
+            block_state.stack.push(Entity::runtime(Type::Bool));
         },
 
         InstrKind::Bne { to } => {
@@ -323,7 +324,7 @@ struct TcState<'b, I> {
 struct BlockState<'b, I> {
     pub body: &'b Bytecode<I>,
     pub file_name: &'b str,
-    pub stack: Vec<Type>,
+    pub stack: Vec<Entity>,
     pub ip: usize,
 }
 
@@ -338,8 +339,35 @@ impl<I> BlockState<'_, I> {
     }
 }
 
-pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Type>) -> [Option<Type>; N] {
-    const NONE: Option<Type> = None;
+// this represents a type, maybe with a comptime known value
+#[derive(Debug, Clone, Eq)]
+pub(crate) struct Entity {
+    pub t: Type,
+    pub v: Option<Value>
+}
+
+impl Entity {
+    pub const fn any_type() -> Self {
+        Self::runtime(Type::Any)
+    }
+    pub const fn runtime(t: Type) -> Self {
+        Self { t, v: None }
+    }
+    pub const fn comptime(t: Type, v: Value) -> Self {
+        Self { t, v: Some(v) }
+    }
+}
+
+impl PartialEq for Entity {
+    fn eq(&self, other: &Self) -> bool {
+        &self.t == &other.t
+    }
+}
+
+type Value = Literal; // for now
+
+pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Entity>) -> [Option<Entity>; N] {
+    const NONE: Option<Entity> = None;
     let mut res = [NONE; N];
     let start = if vec.len() < N { vec.len() as isize - 1 } else { vec.len() as isize - N as isize };
     for (idx, item) in vec.drain((start.max(0) as usize)..).rev().enumerate() {
@@ -348,8 +376,8 @@ pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Type>) -> [Option<Ty
     res
 }
 
-pub(crate) fn split_signature_dynamic(vec: &mut Vec<Type>, n: usize) -> Vec<Option<Type>> {
-    const NONE: Option<Type> = None;
+pub(crate) fn split_signature_dynamic(vec: &mut Vec<Entity>, n: usize) -> Vec<Option<Entity>> {
+    const NONE: Option<Entity> = None;
     let mut res = vec![NONE; n];
     let start = if vec.len() < n { vec.len() - 1 } else { vec.len() - n };
     for (idx, item) in vec.drain(start..).rev().enumerate() {
@@ -358,12 +386,12 @@ pub(crate) fn split_signature_dynamic(vec: &mut Vec<Type>, n: usize) -> Vec<Opti
     res
 }
 
-pub(crate) fn verify_signature<const N: usize>(want: [Type; N], got: [Option<Type>; N]) -> Result<(), TypeError> {
+pub(crate) fn verify_signature<const N: usize>(want: [Type; N], got: [Option<Entity>; N]) -> Result<(), TypeError> {
     for (lhs, rhs) in iter::zip(&want, &got) {
         let expect_any   = lhs == &Type::Any && rhs.is_none();
-        let expect_match = lhs != &Type::Any && Some(lhs) != rhs.as_ref();
+        let expect_match = lhs != &Type::Any && Some(lhs) != rhs.as_ref().map(|val| &val.t);
         if expect_any || expect_match {
-            return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: want.to_vec(), got: got.into_iter().filter_map(identity).collect() }))
+            return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: want.to_vec().into_iter().map(|val| Entity::runtime(val)).collect(), got: got.into_iter().filter_map(identity).collect() }))
         }
     }
     Ok(())
@@ -376,6 +404,15 @@ fn find_instr_kind<I: Intrinsic>(bytecode: &BytecodeSlice<I>, instr_kind: InstrK
 fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer: Producer) -> Option<usize> {
     find_instr_kind(bytecode, InstrKind::Label { label, producer })
 }
+
+fn literal_type(literal: Literal) -> Entity {
+    match literal {
+        Literal::Int(..)  => Entity::comptime(Type::Int, literal),
+        Literal::Bool(..) => Entity::comptime(Type::Bool, literal),
+        Literal::Str(..)  => Entity::comptime(Type::Ptr { inner: Box::new(Type::Char) }, literal.clone())
+    }
+}
+
 
 pub(crate) struct TypeError {
     kind: TypeErrorKind,
@@ -392,11 +429,11 @@ pub(crate) enum TypeErrorKind {
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Mismatch { want: Vec<Type>, got: Vec<Type> }
+    Mismatch { want: Vec<Entity>, got: Vec<Entity> }
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
-    let diag = match &value.kind {
+    let diag = match value.kind {
         TypeErrorKind::UnknownFn { name } => Diagnostic::error("unknown word").code(name),
         TypeErrorKind::BranchesNotEmpty => {
             Diagnostic::error("branch changes stack")
@@ -409,8 +446,8 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
         },
         TypeErrorKind::Mismatch { want, got } => {
             Diagnostic::error("type mismatch")
-                .note(format!("want: {:?}", want))
-                .note(format!("got: {:?}", got))
+                .note(format!("want: {:?}", want.into_iter().map(|val| val.t).collect::<Vec<_>>()))
+                .note(format!("got: {:?}",  got .into_iter().map(|val| val.t).collect::<Vec<_>>()))
         }
     };
     if value.file_span.span != Span::default() {
