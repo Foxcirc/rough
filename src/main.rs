@@ -9,7 +9,7 @@ pub mod typecheck;
 pub mod diagnostic;
 
 use std::{env, time, collections::HashMap, fmt};
-use codegen::{Bytecode, FunWithMetadata};
+use codegen::{Bytecode, FunWithMetadata, Program, Symbols};
 use diagnostic::Diagnostic;
 use parser::IdentStr;
 
@@ -67,27 +67,14 @@ fn main() {
 
     // we now need to genrate code for the source files
 
-    let mut program = codegen::Program::default();
+    let mut symbols: Symbols<arch::Intel64> = Symbols::default();
 
     for source_file in source_files.into_iter() {
 
         let name = source_file.name().to_string();
 
-        match typegen::typegen::<arch::Intel64>(&mut program, &source_file.path, source_file.items.types) {
-            Ok(()) => (),
-            Err(err) => {
-                if opts.debug() {
-                    Diagnostic::debug("typegen failed").emit();
-                }
-                typegen::format_error(err)
-                    .file(name)
-                    .emit();
-                return
-            }
-        };
-
-        match codegen::codegen::<arch::Intel64>(&mut program, &source_file.path, source_file.items.funs) { // todo: add debug timings for codegen
-            Ok(()) => (),
+        let part = match codegen::codegen(&source_file.path, source_file.items.funs) { // todo: add debug timings for codegen
+            Ok(val) => val,
             Err(err) => {
                 if opts.debug() {
                     Diagnostic::debug("codegen failed").emit();
@@ -99,15 +86,18 @@ fn main() {
             }
         };
 
+        symbols.types.extend(part.types);
+        symbols.funs.extend(part.funs);
+
     }
 
     if opts.mode == cli::Mode::ShowIr {
         Diagnostic::debug("showing intermediate representation").emit();
-        format_bytecode(&program.funs);
+        debug_print_program(&symbols);
     }
 
-    match typecheck::typecheck(&program) {
-        Ok(()) => (),
+    let _program = match typecheck::typecheck(symbols) {
+        Ok(val) => val,
         Err(err) => {
             if opts.debug() {
                 Diagnostic::debug("typecheck failed").emit();
@@ -162,8 +152,8 @@ pub(crate) mod arch {
 
 }
 
-fn format_bytecode<I: fmt::Debug>(funs: &HashMap<IdentStr, FunWithMetadata<I>>) {
-    for (name, fun) in funs.iter() {
+fn debug_print_program<I: fmt::Debug>(program: &Symbols<I>) {
+    for (name, fun) in program.funs.iter() {
         eprintln!("fn {} (file {}):", name, fun.file_name);
         for (idx, instruction) in fun.body.iter().enumerate() {
             eprintln!("{:3}: {:?}", idx, instruction);

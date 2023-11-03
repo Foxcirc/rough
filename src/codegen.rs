@@ -1,27 +1,29 @@
 
 
-use std::{fmt, collections::HashMap, path::{Path, PathBuf}, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, ParsedSignature, FnSignature, Signature, FunDef}, diagnostic::Diagnostic, parse_modules::SourceFile, arch::Intrinsic};
+use std::{fmt, collections::HashMap, path::PathBuf, borrow::Cow};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, ParsedSignature, FunDef, FnSignature}, diagnostic::Diagnostic, arch::Intrinsic};
 
-pub(crate) fn codegen<I: Intrinsic>(program: &mut Program<I>, file_path: &PathBuf, funs: Vec<FunDef>) -> Result<(), CodegenError> {
+pub(crate) fn codegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
 
-    for fun in funs.into_iter() {
+    let mut part = Symbols::default();
+
+    for item in funs.into_iter() {
 
         let mut state = State::<I>::default();
-        codegen_block(&mut state, fun.body, None)?;
-        state.bytecode.push(Instr::spanned(InstrKind::Return, fun.span));
+        codegen_block(&mut state, item.body, None)?;
+        state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
 
-        let result = FunWithMetadata {
+        let fun = FunWithMetadata {
             file_name: file_path.to_string_lossy().to_string(), // todo: rename all "human-only" things to smth like human_file_name
-            signature: fun.signature,
+            signature: item.signature,
             body: state.bytecode,
         };
 
-        program.funs.insert(fun.name, result);
+        part.funs.insert(item.name, fun);
     
     }
 
-    Ok(())
+    Ok(part)
 
 }
 
@@ -226,12 +228,13 @@ impl<I> State<I> {
     }
 }
 
-pub(crate) struct Program<I> {
-    pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
+pub(crate) struct Symbols<I> {
+    pub funs: HashMap<IdentStr, FunWithMetadata<I, ParsedSignature>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
 
-impl<I> Default for Program<I> {
+// cannot derive Default because of the generics
+impl<I> Default for Symbols<I> {
     fn default() -> Self {
         Self {
             funs: HashMap::new(),
@@ -240,13 +243,17 @@ impl<I> Default for Program<I> {
     }
 }
 
+pub(crate) struct Program<I> {
+    pub funs: HashMap<IdentStr, FunWithMetadata<I, FnSignature>>,
+    pub types: HashMap<Cow<'static, str>, Type>,
+}
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
 pub(crate) type BytecodeSlice<I> = [Instr<I>];
 
 #[derive(Debug, Default)]
-pub(crate) struct FunWithMetadata<I> {
+pub(crate) struct FunWithMetadata<I, S> {
     pub file_name: String,
-    pub signature: ParsedSignature,
+    pub signature: S,
     pub body: Bytecode<I>,
 }
 

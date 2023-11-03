@@ -1,7 +1,7 @@
 
 use nom::{branch::alt, multi::{many0, many1, fold_many0, separated_list1}, sequence::{pair, delimited, preceded, terminated, tuple, separated_pair}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
 use nom_locate::LocatedSpan;
-use crate::diagnostic;
+use crate::{diagnostic, typecheck::Entity};
 
 pub(crate) fn parse(dat: &str) -> Result<ParseTranslationUnit, ParseError> {
     parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
@@ -72,23 +72,13 @@ pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<ParsedSignature> {
         delimited(
             char('('),
             separated_pair(
-                many0(preceded(multispace0, parse_type_lit)),
+                many0(preceded(multispace0, parse_ident)),
                 opt(preceded(multispace0, tag("->"))),
-                many0(preceded(multispace0, parse_type_lit))
+                many0(preceded(multispace0, parse_ident))
             ),
             char(')')
         ),
         |(takes, returns)| Signature { takes, returns }
-    )(dat)
-}
-
-pub(crate) fn parse_type_lit(dat: ParseInput) -> ParseResult<TypeLiteral> {
-    map(
-        pair(
-            parse_ident,
-            opt(delimited(char('<'), cut(many1(terminated(parse_type_lit, multispace0))), char('>')))
-        ),
-        |(name, maybe_types)| TypeLiteral { name, types: maybe_types.unwrap_or_default() }
     )(dat)
 }
 
@@ -310,8 +300,8 @@ impl<I> Default for Signature<I> {
     }
 }
 
-pub(crate) type ParsedSignature = Signature<TypeLiteral>;
-pub(crate) type FnSignature = Signature<Type>;
+pub(crate) type ParsedSignature = Signature<IdentStr>;
+pub(crate) type FnSignature = Signature<Entity>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
@@ -399,12 +389,6 @@ pub(crate) enum Literal {
     Int(u64),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)] // todo: what derives are needed
-pub(crate) struct TypeLiteral {
-    pub name: IdentStr,
-    pub types: Vec<TypeLiteral>,
 }
 
 pub(crate) type IdentStr = String;

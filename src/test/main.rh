@@ -11,7 +11,6 @@ fn main {
         "NO"
     }
     ~
-    int ptr:from-int
 }
 
 fn add-intrinsic (int int -> int) {

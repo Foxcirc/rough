@@ -1,23 +1,25 @@
 
 use std::{convert::identity, iter};
 
-use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Program, FunWithMetadata}, parser::{Type, Span, Signature, ParsedSignature, TypeLiteral, Literal}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Symbols, FunWithMetadata, Program}, parser::{Type, Span, Literal, FnSignature}, arch::Intrinsic, diagnostic::Diagnostic};
 
-pub(crate) fn typecheck<I: Intrinsic>(program: &Program<I>) -> Result<(), TypeError> {
+pub(crate) fn typecheck<I: Intrinsic>(program: Symbols<I>) -> Result<Program<I>, TypeError> {
+
+    let program = crate::typegen::typegen(program).expect("failed type generation");
 
     let tc_state = TcState {
-        program
+        program: &program,
     };
 
     for fun in program.funs.values() {
         typecheck_fun(&tc_state, &fun)?;
     }
 
-    Ok(())
+    Ok(program)
 
 }
 
-fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I>) -> Result<(), TypeError> {
+fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I, FnSignature>) -> Result<(), TypeError> {
 
     let mut state = BlockState {
         body: &fun.body,
@@ -26,36 +28,15 @@ fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I>) 
         ip: 0,
     };
 
-    // todo: push signature onto the stack
-
-    let takes = translate_type_lit(&fun.signature.takes)?;
-    state.stack.extend(takes);
+    state.stack.extend(fun.signature.takes.clone());
 
     typecheck_block(tc_state, &mut state, &fun.body)?;
 
-    // todo: actually verify signature
-
-    let returns = translate_type_lit(&fun.signature.returns)?;
-    if state.stack != returns {
-        return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: returns, got: state.stack }))
+    if &state.stack != &fun.signature.returns {
+        return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: fun.signature.returns.clone(), got: state.stack }))
     }
 
     Ok(())
-
-}
-
-fn translate_type_lit(types: &Vec<TypeLiteral>) -> Result<Vec<Entity>, TypeError> {
-
-    let mut result = Vec::new();
-
-    for item in types {
-        match &item.name[..] {
-            "int" => result.push(Entity::runtime(Type::Int)),
-            other => todo!("invalid type literal in signature: {}", other),
-        }
-    }
-
-    Ok(result)
 
 }
 
@@ -95,18 +76,16 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
                 Some(val) => val,
                 None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.to_string() }))
             };
-            let takes = translate_type_lit(&inner.signature.takes)?;
-            let returns = translate_type_lit(&inner.signature.returns)?;
-            let elems = split_signature_dynamic(&mut block_state.stack, takes.len());
-            for (lhs, rhs) in iter::zip(&takes, &elems) {
+            let elems = split_signature_dynamic(&mut block_state.stack, inner.signature.takes.len());
+            for (lhs, rhs) in iter::zip(&inner.signature.takes, &elems) {
                 if Some(lhs) != rhs.as_ref() {
                     return Err(TypeError::unspanned(TypeErrorKind::Mismatch {
-                        want: takes,
+                        want: inner.signature.takes.clone(),
                         got: elems.into_iter().filter_map(identity).collect()
                     }))
                 }
             }
-            block_state.stack.extend(returns);
+            block_state.stack.extend(inner.signature.returns.clone());
         },
 
         InstrKind::Return => (),
@@ -391,7 +370,7 @@ pub(crate) fn verify_signature<const N: usize>(want: [Type; N], got: [Option<Ent
         let expect_any   = lhs == &Type::Any && rhs.is_none();
         let expect_match = lhs != &Type::Any && Some(lhs) != rhs.as_ref().map(|val| &val.t);
         if expect_any || expect_match {
-            return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: want.to_vec().into_iter().map(|val| Entity::runtime(val)).collect(), got: got.into_iter().filter_map(identity).collect() }))
+            return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: types_to_entities(want), got: got.into_iter().filter_map(identity).collect() }))
         }
     }
     Ok(())
@@ -413,6 +392,9 @@ fn literal_type(literal: Literal) -> Entity {
     }
 }
 
+pub(crate) fn types_to_entities(input: impl IntoIterator<Item = Type>) -> Vec<Entity> {
+    input.into_iter().map(|val| Entity::runtime(val)).collect()
+}
 
 pub(crate) struct TypeError {
     kind: TypeErrorKind,
