@@ -1,11 +1,11 @@
 
-use std::{convert::identity, iter};
+use std::{convert::identity, iter, borrow::Cow, collections::HashMap};
 
-use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Symbols, FunWithMetadata, Program}, parser::{Type, Span, Literal, FnSignature}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Symbols, FunWithMetadata, Program}, parser::{Type, Span, Literal, FnSignature, ParsedSignature, Op, OpKind}, arch::Intrinsic, diagnostic::Diagnostic};
 
 pub(crate) fn typecheck<I: Intrinsic>(program: Symbols<I>) -> Result<Program<I>, TypeError> {
 
-    let program = crate::typegen::typegen(program).expect("failed type generation");
+    let program = typegen(program)?;
 
     let tc_state = TcState {
         program: &program,
@@ -28,11 +28,13 @@ fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I, F
         ip: 0,
     };
 
-    state.stack.extend(fun.signature.takes.clone());
+    let takes = fun.signature.takes_types_iter();
+    state.stack.extend(takes.cloned().map(Entity::runtime));
 
     typecheck_block(tc_state, &mut state, &fun.body)?;
 
-    if &state.stack != &fun.signature.returns {
+    let returns = fun.signature.returns_types_iter();
+    if returns.ne(state.stack.iter().map(|entity| &entity.t)) {
         return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: fun.signature.returns.clone(), got: state.stack }))
     }
 
@@ -68,7 +70,7 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
     match instr_kind {
 
         InstrKind::Push { value } => {
-            block_state.stack.push(literal_type(value.clone())) // :(
+            block_state.stack.push(literal_entity(value.clone())) // :(
         },
 
         InstrKind::Call { to } => {
@@ -77,15 +79,15 @@ fn typecheck_instr<I: Intrinsic>(tc_state: &TcState<I>, block_state: &mut BlockS
                 None => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: to.to_string() }))
             };
             let elems = split_signature_dynamic(&mut block_state.stack, inner.signature.takes.len());
-            for (lhs, rhs) in iter::zip(&inner.signature.takes, &elems) {
-                if Some(lhs) != rhs.as_ref() {
-                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch {
-                        want: inner.signature.takes.clone(),
-                        got: elems.into_iter().filter_map(identity).collect()
-                    }))
-                }
+            let returns = inner.signature.takes_types_iter();
+            if returns.map(|item| Some(item)).ne(elems.iter().map(|opt| opt.as_ref().map(|entity| &entity.t))) {
+                return Err(TypeError::unspanned(TypeErrorKind::Mismatch {
+                    want: inner.signature.takes.clone(),
+                    got: elems.into_iter().filter_map(identity).collect()
+                }))
             }
-            block_state.stack.extend(inner.signature.returns.clone());
+            let returns = inner.signature.returns_types_iter();
+            block_state.stack.extend(returns.cloned().map(Entity::runtime));
         },
 
         InstrKind::Return => (),
@@ -349,7 +351,7 @@ pub(crate) fn split_signature<const N: usize>(vec: &mut Vec<Entity>) -> [Option<
     const NONE: Option<Entity> = None;
     let mut res = [NONE; N];
     let start = if vec.len() < N { vec.len() as isize - 1 } else { vec.len() as isize - N as isize };
-    for (idx, item) in vec.drain((start.max(0) as usize)..).rev().enumerate() {
+    for (idx, item) in vec.drain((start.max(0) as usize)..).enumerate() {
         res[idx] = Some(item);
     }
     res
@@ -384,12 +386,103 @@ fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer:
     find_instr_kind(bytecode, InstrKind::Label { label, producer })
 }
 
-fn literal_type(literal: Literal) -> Entity {
+fn literal_entity(literal: Literal) -> Entity {
     match literal {
         Literal::Int(..)  => Entity::comptime(Type::Int, literal),
         Literal::Bool(..) => Entity::comptime(Type::Bool, literal),
-        Literal::Str(..)  => Entity::comptime(Type::Ptr { inner: Box::new(Type::Char) }, literal.clone())
+        Literal::Str(..)  => Entity::comptime(Type::Ptr { inner: Box::new(Type::Char) }, literal),
+        Literal::Type(..) => Entity::comptime(Type::Type, literal)
     }
+}
+
+pub(crate) fn typegen<I>(mut program: Symbols<I>) -> Result<Program<I>, TypeError> {
+
+    // add the primitive types to the programs type list
+    
+    program.types.insert(Cow::Borrowed("int"), Type::Int);
+
+    let mut funs = HashMap::with_capacity(program.funs.len());
+    for (name, fun) in program.funs.into_iter() {
+        let types = eval_types_signature(fun.signature)?;
+        let val = FunWithMetadata {
+            file_name: fun.file_name,
+            body: fun.body,
+            signature: types
+        };
+        funs.insert(name, val);
+    }
+
+    Ok(Program {
+        funs,
+        types: program.types,
+    })
+
+}
+
+fn eval_types_signature(signature: ParsedSignature) -> Result<FnSignature, TypeError> {
+
+    Ok(FnSignature {
+        takes: eval_types(signature.takes)?,
+        returns: eval_types(signature.returns)?,
+    })
+
+}
+
+fn eval_types(types: Vec<Op>) -> Result<Vec<Entity>, TypeError> {
+
+    let mut result: Vec<Entity> = Vec::new();
+
+    for item in types {
+
+        match item.kind {
+            OpKind::Push { value: literal } => result.push(literal_entity(literal)),
+            OpKind::Call { name } => {
+                match &name[..] {
+                    "int" => result.push(literal_entity(Literal::Type(Type::Int))),
+                    "bool" => result.push(literal_entity(Literal::Type(Type::Bool))),
+                    "char" => result.push(literal_entity(Literal::Type(Type::Char))),
+                    // "str" => result.push(literal_entity(Literal::Type(Type::Ptr { inner: Box::new(Type::Char) }))),
+                    "ptr" => {
+                        let items = split_signature::<1>(&mut result);
+                        if let [Some(inner_raw)] = items {
+                            let inner = match inner_raw.v {
+                                Some(Literal::Type(val)) => val,
+                                Some(other) => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: vec![literal_entity(other)] })),
+                                None        => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: vec![] }))
+                            };
+                            result.push(literal_entity(Literal::Type(Type::Ptr { inner: Box::new(inner) })))
+                        } else {
+                            return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: items.into_iter().filter_map(identity).collect() }))
+                        }
+                    },
+                    "array" => {
+                        let items = split_signature::<2>(&mut result);
+                        if let [Some(inner_raw), Some(length_raw)] = items {
+                            let inner = match inner_raw.v {
+                                Some(Literal::Type(val)) => val,
+                                Some(other) => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: vec![literal_entity(other)] })),
+                                None        => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: vec![] }))
+                            };
+                            let length = match length_raw.v {
+                                Some(Literal::Int(val)) => val,
+                                Some(other) => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: vec![literal_entity(other)] })),
+                                None        => return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: vec![] }))
+                            };
+                            result.push(literal_entity(Literal::Type(Type::Array { inner: Box::new(inner), length })))
+                        } else {
+                            return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: vec![Entity::any_type()], got: items.into_iter().filter_map(identity).collect() }))
+                        }
+                    }
+                    other => return Err(TypeError::unspanned(TypeErrorKind::UnknownFn { name: other.to_string() }))
+                }
+            },
+            _other => todo!("invalid op in type eval")
+        }
+
+    }
+    
+    Ok(result)
+
 }
 
 pub(crate) fn types_to_entities(input: impl IntoIterator<Item = Type>) -> Vec<Entity> {
@@ -411,7 +504,7 @@ pub(crate) enum TypeErrorKind {
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Mismatch { want: Vec<Entity>, got: Vec<Entity> }
+    Mismatch { want: Vec<Entity>, got: Vec<Entity> },
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
@@ -428,8 +521,8 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
         },
         TypeErrorKind::Mismatch { want, got } => {
             Diagnostic::error("type mismatch")
-                .note(format!("want: {:?}", want.into_iter().map(|val| val.t).collect::<Vec<_>>()))
-                .note(format!("got: {:?}",  got .into_iter().map(|val| val.t).collect::<Vec<_>>()))
+                .note(format!("want {:?}", want.into_iter().map(|val| val.t).collect::<Vec<_>>()))
+                .note(format!("got {:?}",  got .into_iter().map(|val| val.t).collect::<Vec<_>>()))
         }
     };
     if value.file_span.span != Span::default() {

@@ -72,9 +72,9 @@ pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<ParsedSignature> {
         delimited(
             char('('),
             separated_pair(
-                many0(preceded(multispace0, parse_ident)),
+                many0(preceded(multispace0, parse_comptime_op)),
                 opt(preceded(multispace0, tag("->"))),
-                many0(preceded(multispace0, parse_ident))
+                many0(preceded(multispace0, parse_comptime_op))
             ),
             char(')')
         ),
@@ -90,19 +90,41 @@ pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
     )(dat)
 }
 
+pub(crate) fn parse_comptime_op(dat: ParseInput) -> ParseResult<Op> {
+    map(
+        alt((
+            // comments
+            value(OpKind::Nop, parse_comment),
+            // boolean literals
+            value(OpKind::Push { value: Literal::Bool(true) },  tag("true")),
+            value(OpKind::Push { value: Literal::Bool(false) }, tag("false")),
+            // integer literals
+            map(
+                terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
+                |integer| OpKind::Push { value: Literal::Int(integer) }
+            ),
+            // string literals
+            map(parse_str_escaped, |string| OpKind::Push { value: Literal::Str(string) }),
+            // identifiers
+            map(parse_ident, |name| OpKind::Call { name })
+        )),
+        |kind| Op { kind, span: Span::from_located_span(&dat) }
+    )(dat)
+}
+
 pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
-    context("Op", map(
+    map(
         alt((
             alt((
                 value(OpKind::Copy,  char('*')),
+                value(OpKind::Drop,  char('~')),
                 value(OpKind::Over,  char('+')),
                 value(OpKind::Swap,  char('-')),
                 value(OpKind::Rot3,  terminated(tag("rot3"), multispace1)),
                 value(OpKind::Rot4,  terminated(tag("rot4"), multispace1)),
-                value(OpKind::Drop,  char('~')),
                 value(OpKind::Read,  char('>')),
                 value(OpKind::Write, char('<')),
-                value(OpKind::Move,  char('~')),
+                // value(OpKind::Move,  char('~')),
                 value(OpKind::Addr,  char('&')),
                 value(OpKind::Type,  char('?')),
                 value(OpKind::Size,  char('!')),
@@ -131,28 +153,17 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
                 map(preceded(pair(tag("for"),  multispace1), cut(parse_block)), |block| OpKind::For  { block }),
                 value(OpKind::Break, tag("break")),
             )),
-            alt((
-                value(OpKind::Push { value: Literal::Bool(true) },  tag("true")),
-                value(OpKind::Push { value: Literal::Bool(false) }, tag("false")),
-            )),
-            alt((
-                map(
-                    terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
-                    |integer| OpKind::Push { value: Literal::Int(integer) }
-                ),
-                map(parse_str_escaped, |string|  OpKind::Push { value: Literal::Str(string) }),
-                map(parse_ident,       |name|    OpKind::Call { name })
-            )),
+            map(parse_comptime_op, |op| op.kind)
         )),
         |kind| Op { kind, span: Span::from_located_span(&dat) }
-    ))(dat)
+    )(dat)
 }
 
-pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<u64> {
+pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<usize> {
 
     use nom::{Err as NomErr, error::ErrorKind};
 
-    let parse_int = |radix| move |input: ParseInput| u64::from_str_radix(input.into_fragment(), radix);
+    let parse_int = |radix| move |input: ParseInput| usize::from_str_radix(input.into_fragment(), radix);
 
     let mut result: IResult<_, _, ParseError> = context("expected integer", alt((
         map_res(preceded(alt((tag("0x"), tag("0X"))), recognize(many1(one_of("0123456789abcdefABCDEF")))), parse_int(16)),
@@ -300,8 +311,23 @@ impl<I> Default for Signature<I> {
     }
 }
 
-pub(crate) type ParsedSignature = Signature<IdentStr>;
+pub(crate) type ParsedSignature = Signature<Op>;
 pub(crate) type FnSignature = Signature<Entity>;
+
+impl FnSignature {
+    pub fn takes_types_iter(&self) -> impl Iterator<Item = &Type> {
+        self.takes.iter().map(|item| match item.v.as_ref().unwrap() {
+            Literal::Type(t) => t,
+            _other => unreachable!()
+        })
+    }
+    pub fn returns_types_iter(&self) -> impl Iterator<Item = &Type> {
+        self.returns.iter().map(|item| match item.v.as_ref().unwrap() {
+            Literal::Type(t) => t,
+            _other => unreachable!()
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
@@ -322,9 +348,9 @@ pub(crate) enum Type {
     // I32,
     // I64,
     // type
-    // Type,
+    Type,
     // complex types
-    // Array { inner: Box<Type>, length: u64 },
+    Array { inner: Box<Type>, length: usize },
     // Tuple { inner: Vec<Type> },
     // user types (newtype)
     // New { name: &'a str, size: u64 }
@@ -339,6 +365,7 @@ pub(crate) struct Op {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum OpKind {
 
+    Nop, // this is currently only used to implement comments
     Push { value: Literal },
 
     Call { name: IdentStr },
@@ -352,7 +379,7 @@ pub(crate) enum OpKind {
 
     Read,
     Write,
-    Move,
+    // Move,
 
     Addr,
     Type,
@@ -386,9 +413,10 @@ pub(crate) enum OpKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Literal {
-    Int(u64),
+    Int(usize),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
+    Type(Type),
 }
 
 pub(crate) type IdentStr = String;

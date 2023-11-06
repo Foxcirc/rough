@@ -33,6 +33,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 
         match op.kind {
 
+            OpKind::Nop => (),
             OpKind::Push { value } => state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
 
             OpKind::Call { name }  => {
@@ -54,7 +55,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Read  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)),
             OpKind::Write => state.bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
 
-            OpKind::Move  => todo!(),
+            // OpKind::Move  => todo!(),
             OpKind::Addr  => todo!(),
             OpKind::Type  => todo!(),
             OpKind::Size  => todo!(),

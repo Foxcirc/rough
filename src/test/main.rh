@@ -11,6 +11,15 @@ fn main {
         "NO"
     }
     ~
+    // 0 4 array-from-default
+}
+
+fn foreward-array (int 10 array -> int 10 array) {
+
+}
+
+fn drop-ptr (int ptr) {
+    ~
 }
 
 fn add-intrinsic (int int -> int) {

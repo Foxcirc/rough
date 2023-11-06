@@ -4,14 +4,12 @@ pub(crate) mod test;
 
 pub mod parser;
 pub mod codegen;
-pub mod typegen;
 pub mod typecheck;
 pub mod diagnostic;
 
-use std::{env, time, collections::HashMap, fmt};
-use codegen::{Bytecode, FunWithMetadata, Program, Symbols};
+use std::{env, time, fmt};
+use codegen::{Symbols, Program};
 use diagnostic::Diagnostic;
-use parser::IdentStr;
 
 fn main() {
     
@@ -91,12 +89,7 @@ fn main() {
 
     }
 
-    if opts.mode == cli::Mode::ShowIr {
-        Diagnostic::debug("showing intermediate representation").emit();
-        debug_print_program(&symbols);
-    }
-
-    let _program = match typecheck::typecheck(symbols) {
+    let program = match typecheck::typecheck(symbols) {
         Ok(val) => val,
         Err(err) => {
             if opts.debug() {
@@ -106,6 +99,11 @@ fn main() {
             return;
         }
     };
+
+    if opts.mode == cli::Mode::ShowIr {
+        Diagnostic::debug("showing intermediate representation").emit();
+        debug_print_program(&program);
+    }
 
 }
 
@@ -152,7 +150,7 @@ pub(crate) mod arch {
 
 }
 
-fn debug_print_program<I: fmt::Debug>(program: &Symbols<I>) {
+fn debug_print_program<I: fmt::Debug>(program: &Program<I>) {
     for (name, fun) in program.funs.iter() {
         eprintln!("fn {} (file {}):", name, fun.file_name);
         for (idx, instruction) in fun.body.iter().enumerate() {
@@ -225,10 +223,6 @@ pub(crate) mod parse_modules {
         ))
     }
 
-    pub(crate) fn source_files(state: State) -> Vec<SourceFile> {
-        state.source_files.into()
-    }
-
     #[derive(Default)]
     pub(crate) struct State {
         pub(crate) visited: HashSet<PathBuf>,
@@ -242,8 +236,8 @@ pub(crate) mod parse_modules {
     }
 
     // todo: why is TranslationUnit generic over U??
-    pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>; // todo:
-    // rename "parser::Use" to something more meaningful
+    // todo: rename "parser::Use" to something more meaningful
+    pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>;
 
     impl SourceFile {
         pub(crate) fn name(&self) -> &str {
