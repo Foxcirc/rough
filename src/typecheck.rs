@@ -1,7 +1,7 @@
 
 use std::{convert::identity, iter, borrow::Cow, collections::HashMap};
 
-use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Symbols, FunWithMetadata, Program}, parser::{Type, Span, Literal, FnSignature, ParsedSignature, Op, OpKind}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{codegen::{InstrKind, Producer, Bytecode, FileSpan, Label, BytecodeSlice, Symbols, FunWithMetadata, Program}, parser::{Type, Span, Literal, Op, OpKind}, arch::Intrinsic, diagnostic::Diagnostic};
 
 pub(crate) fn typecheck<I: Intrinsic>(program: Symbols<I>) -> Result<Program<I>, TypeError> {
 
@@ -19,7 +19,7 @@ pub(crate) fn typecheck<I: Intrinsic>(program: Symbols<I>) -> Result<Program<I>,
 
 }
 
-fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I, FnSignature>) -> Result<(), TypeError> {
+fn typecheck_fun<I: Intrinsic>(tc_state: &TcState<I>, fun: &FunWithMetadata<I>) -> Result<(), TypeError> {
 
     let mut state = BlockState {
         body: &fun.body,
@@ -391,7 +391,8 @@ fn literal_entity(literal: Literal) -> Entity {
         Literal::Int(..)  => Entity::comptime(Type::Int, literal),
         Literal::Bool(..) => Entity::comptime(Type::Bool, literal),
         Literal::Str(..)  => Entity::comptime(Type::Ptr { inner: Box::new(Type::Char) }, literal),
-        Literal::Type(..) => Entity::comptime(Type::Type, literal)
+        Literal::Type(..) => Entity::comptime(Type::Type, literal),
+        Literal::Tuple(..) => todo!(),
     }
 }
 

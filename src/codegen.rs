@@ -1,7 +1,7 @@
 
 
 use std::{fmt, collections::HashMap, path::PathBuf, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, ParsedSignature, FunDef, FnSignature}, diagnostic::Diagnostic, arch::Intrinsic};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, FunDef}, diagnostic::Diagnostic, arch::Intrinsic};
 
 pub(crate) fn codegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
 
@@ -53,13 +53,14 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Drop  => state.bytecode.push(Instr::spanned(InstrKind::Drop, op.span)),
 
             OpKind::Read  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)),
+            OpKind::Move  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)), // todo: implement variable move
             OpKind::Write => state.bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
 
             // OpKind::Move  => todo!(),
-            OpKind::Addr  => todo!(),
-            OpKind::Type  => todo!(),
-            OpKind::Size  => todo!(),
-            OpKind::Dot   => todo!(),
+            OpKind::Addr   => todo!(),
+            OpKind::Type   => todo!(),
+            OpKind::Size   => todo!(),
+            OpKind::Access => todo!(),
 
             OpKind::Add => state.bytecode.push(Instr::spanned(InstrKind::Add, op.span)),
             OpKind::Sub => state.bytecode.push(Instr::spanned(InstrKind::Sub, op.span)),
@@ -191,7 +192,7 @@ pub(crate) enum InstrKind<I> {
     Lt,
     Lte,
 
-    Bne { to: Label }, // todo: make it all tuple variants
+    Bne { to: Label },
     Bra { to: Label },
 
     Intrinsic(I),
@@ -230,7 +231,7 @@ impl<I> State<I> {
 }
 
 pub(crate) struct Symbols<I> {
-    pub funs: HashMap<IdentStr, FunWithMetadata<I, ParsedSignature>>,
+    pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
 
@@ -245,16 +246,16 @@ impl<I> Default for Symbols<I> {
 }
 
 pub(crate) struct Program<I> {
-    pub funs: HashMap<IdentStr, FunWithMetadata<I, FnSignature>>,
+    pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
 pub(crate) type BytecodeSlice<I> = [Instr<I>];
 
 #[derive(Debug, Default)]
-pub(crate) struct FunWithMetadata<I, S> {
+pub(crate) struct FunWithMetadata<I> {
     pub file_name: String,
-    pub signature: S,
+    pub signature: Vec<Op>,
     pub body: Bytecode<I>,
 }
 

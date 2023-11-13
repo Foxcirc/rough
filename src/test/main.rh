@@ -11,36 +11,11 @@ fn main {
         "NO"
     }
     ~
-    // 0 4 array-from-default
+    5 10 & add-assign
 }
 
-fn foreward-array (int 10 array -> int 10 array) {
-
+// <int ptr<int>>
+fn add-assign <variadic> {
+    ptr-read rot3 add swap ptr-write
 }
-
-fn drop-ptr (int ptr) {
-    ~
-}
-
-fn add-intrinsic (int int -> int) {
-    add
-}
-
-// fn foo-array (-> int 4 array) {
-//     0 4 array:from-default
-//     1 2 3 4 array:from-4
-//     1 2 3 4 4 array:from-n
-// }
-// 
-// fn foo-slice (-> int slice) {
-//     foo-array
-//     slice:from-array
-//     ptr:null 10 slice:from-parts
-//     0 4 list:from-default
-// }
-// 
-// fn foo-tuple (-> int bool 2 tuple) {
-//     42 true tuple:from-2
-//     42 true 2 tuple:from-n
-// }
 

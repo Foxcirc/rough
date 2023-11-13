@@ -1,7 +1,7 @@
 
-use nom::{branch::alt, multi::{many0, many1, fold_many0, separated_list1}, sequence::{pair, delimited, preceded, terminated, tuple, separated_pair}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish, Offset};
+use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
-use crate::{diagnostic, typecheck::Entity};
+use crate::diagnostic;
 
 pub(crate) fn parse(dat: &str) -> Result<ParseTranslationUnit, ParseError> {
     parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
@@ -67,19 +67,12 @@ pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
     )(dat)
 }
 
-pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<ParsedSignature> {
-    map(
-        delimited(
-            char('('),
-            separated_pair(
-                many0(preceded(multispace0, parse_comptime_op)),
-                opt(preceded(multispace0, tag("->"))),
-                many0(preceded(multispace0, parse_comptime_op))
-            ),
-            char(')')
-        ),
-        |(takes, returns)| Signature { takes, returns }
-    )(dat)
+pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
+    context("expected signature", delimited(
+        char('<'),
+        many0(parse_op),
+        char('>')
+    ))(dat)
 }
 
 pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
@@ -90,45 +83,23 @@ pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
     )(dat)
 }
 
-pub(crate) fn parse_comptime_op(dat: ParseInput) -> ParseResult<Op> {
-    map(
-        alt((
-            // comments
-            value(OpKind::Nop, parse_comment),
-            // boolean literals
-            value(OpKind::Push { value: Literal::Bool(true) },  tag("true")),
-            value(OpKind::Push { value: Literal::Bool(false) }, tag("false")),
-            // integer literals
-            map(
-                terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
-                |integer| OpKind::Push { value: Literal::Int(integer) }
-            ),
-            // string literals
-            map(parse_str_escaped, |string| OpKind::Push { value: Literal::Str(string) }),
-            // identifiers
-            map(parse_ident, |name| OpKind::Call { name })
-        )),
-        |kind| Op { kind, span: Span::from_located_span(&dat) }
-    )(dat)
-}
-
 pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
     map(
         alt((
             alt((
-                value(OpKind::Copy,  char('*')),
-                value(OpKind::Drop,  char('~')),
-                value(OpKind::Over,  char('+')),
-                value(OpKind::Swap,  char('-')),
-                value(OpKind::Rot3,  terminated(tag("rot3"), multispace1)),
-                value(OpKind::Rot4,  terminated(tag("rot4"), multispace1)),
-                value(OpKind::Read,  char('>')),
-                value(OpKind::Write, char('<')),
-                // value(OpKind::Move,  char('~')),
-                value(OpKind::Addr,  char('&')),
-                value(OpKind::Type,  char('?')),
-                value(OpKind::Size,  char('!')),
-                value(OpKind::Dot,   char('.')),
+                value(OpKind::Copy,   char('*')),
+                value(OpKind::Drop,   char('~')),
+                value(OpKind::Over,   char('+')),
+                value(OpKind::Swap,   char('-')),
+                value(OpKind::Addr,   char('&')),
+                value(OpKind::Type,   char('?')),
+                value(OpKind::Size,   char('!')),
+                value(OpKind::Access, char(':')),
+                value(OpKind::Rot3,   terminated(tag("rot3"),   multispace1)),
+                value(OpKind::Rot4,   terminated(tag("rot4"),   multispace1)),
+                value(OpKind::Move,   terminated(tag("move~"),  multispace1)),
+                value(OpKind::Write,  terminated(tag("write~"), multispace1)),
+                value(OpKind::Read,   char('~')),
             )),
             alt((
                 value(OpKind::Add, terminated(tag("add"), multispace1)),
@@ -153,7 +124,24 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
                 map(preceded(pair(tag("for"),  multispace1), cut(parse_block)), |block| OpKind::For  { block }),
                 value(OpKind::Break, tag("break")),
             )),
-            map(parse_comptime_op, |op| op.kind)
+            alt((
+                // comments
+                value(OpKind::Nop, parse_comment),
+                // boolean literals
+                value(OpKind::Push { value: Literal::Bool(true)  }, tag("true")),
+                value(OpKind::Push { value: Literal::Bool(false) }, tag("false")),
+                // integer literals
+                map(
+                    terminated(parse_integer, context("identifier cannot start with a number", cut(peek(not(alpha1))))),
+                    |integer| OpKind::Push { value: Literal::Int(integer) }
+                ),
+                // string literals
+                map(parse_str_escaped, |string| OpKind::Push { value: Literal::Str(string) }),
+                // tuple literals
+                map(parse_tuple_literal, |ops| OpKind::Push { value: Literal::Tuple(ops) }),
+                // identifiers
+                map(parse_ident, |name| OpKind::Call { name }),
+            ))
         )),
         |kind| Op { kind, span: Span::from_located_span(&dat) }
     )(dat)
@@ -219,6 +207,14 @@ pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
         ))),
         char('\"')
     ))(dat)
+}
+
+pub(crate) fn parse_tuple_literal(dat: ParseInput) -> ParseResult<Vec<Op>> {
+    delimited(
+        char('<'),
+        many0(delimited(multispace0, parse_op, multispace0)),
+        char('>')
+    )(dat)
 }
 
 pub(crate) type ParseResult<'a, O> = IResult<ParseInput<'a>, O, ParseError<'a>>;
@@ -292,41 +288,8 @@ pub(crate) struct Use {
 pub(crate) struct FunDef {
     pub name: IdentStr,
     pub span: Span,
-    pub signature: ParsedSignature,
+    pub signature: Vec<Op>,
     pub body: Block,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Signature<T> {
-    pub takes: Vec<T>,
-    pub returns: Vec<T>,
-}
-
-impl<I> Default for Signature<I> {
-    fn default() -> Self {
-        Self {
-            takes: Vec::default(),
-            returns: Vec::default(),
-        }
-    }
-}
-
-pub(crate) type ParsedSignature = Signature<Op>;
-pub(crate) type FnSignature = Signature<Entity>;
-
-impl FnSignature {
-    pub fn takes_types_iter(&self) -> impl Iterator<Item = &Type> {
-        self.takes.iter().map(|item| match item.v.as_ref().unwrap() {
-            Literal::Type(t) => t,
-            _other => unreachable!()
-        })
-    }
-    pub fn returns_types_iter(&self) -> impl Iterator<Item = &Type> {
-        self.returns.iter().map(|item| match item.v.as_ref().unwrap() {
-            Literal::Type(t) => t,
-            _other => unreachable!()
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -379,12 +342,12 @@ pub(crate) enum OpKind {
 
     Read,
     Write,
-    // Move,
+    Move,
 
     Addr,
     Type,
     Size,
-    Dot,
+    Access,
 
     Add,
     Sub,
@@ -417,6 +380,7 @@ pub(crate) enum Literal {
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
     Type(Type),
+    Tuple(Vec<Op>),
 }
 
 pub(crate) type IdentStr = String;
