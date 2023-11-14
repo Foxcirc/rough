@@ -2,13 +2,14 @@
 #[cfg(test)]
 pub(crate) mod test;
 
-pub mod parser;
-pub mod codegen;
-pub mod typecheck;
 pub mod diagnostic;
+pub mod parser;
+pub mod basegen;
+pub mod typegen;
+pub mod eval;
 
 use std::{env, time, fmt};
-use codegen::{Symbols, Program};
+use basegen::{Symbols, Program};
 use diagnostic::Diagnostic;
 
 fn main() {
@@ -54,7 +55,7 @@ fn main() {
     let source_files = state.source_files;
 
     if opts.debug() {
-        let files: Vec<_> = source_files.iter().map(|item| item.name()).collect();
+        let files: Vec<_> = source_files.iter().map(|item| item.human_name()).collect();
         let how_many = source_files.len();
         let what = if source_files.len() == 1 { "file" } else { "files" };
         Diagnostic::debug("parsing done")
@@ -69,15 +70,15 @@ fn main() {
 
     for source_file in source_files.into_iter() {
 
-        let name = source_file.name().to_string();
+        let name = source_file.human_name().to_string();
 
-        let part = match codegen::codegen(&source_file.path, source_file.items.funs) { // todo: add debug timings for codegen
+        let part = match basegen::basegen(&source_file.path, source_file.items.funs) { // todo: add debug timings for codegen
             Ok(val) => val,
             Err(err) => {
                 if opts.debug() {
                     Diagnostic::debug("codegen failed").emit();
                 }
-                codegen::format_error(err)
+                basegen::format_error(err)
                     .file(name)
                     .emit();
                 return
@@ -89,20 +90,32 @@ fn main() {
 
     }
 
-    let program = match typecheck::typecheck(symbols) {
+    let program = match typegen::typecheck(symbols) {
         Ok(val) => val,
         Err(err) => {
             if opts.debug() {
                 Diagnostic::debug("typecheck failed").emit();
             }
-            typecheck::format_error(err).emit();
+            typegen::format_error(err).emit();
             return;
         }
     };
 
-    if opts.mode == cli::Mode::ShowIr {
+    if matches!(opts.mode, cli::Mode::ShowIr) {
         Diagnostic::debug("showing intermediate representation").emit();
         debug_print_program(&program);
+    }
+
+    if matches!(opts.mode, cli::Mode::Build | cli::Mode::Run) {
+
+        match eval::eval(program) {
+            Ok(()) => (),
+            Err(err) => {
+                eval::format_error(err).emit();
+                return;
+            }
+        }
+
     }
 
 }
@@ -217,8 +230,8 @@ pub(crate) mod parse_modules {
 
     fn split_file_name(path: &Path) -> Result<(&Path, &str), Diagnostic> {
         Ok((
-            path.parent().ok_or(Diagnostic::error("invalid file"))?,
-            path.file_name().ok_or(Diagnostic::error("invalid file"))
+            path.parent().ok_or(Diagnostic::error("invalid input file pah"))?,
+            path.file_name().ok_or(Diagnostic::error("invalid input file path"))
                 .and_then(|name| name.to_str().ok_or(Diagnostic::error("non-utf8 file name")))?
         ))
     }
@@ -240,7 +253,7 @@ pub(crate) mod parse_modules {
     pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>;
 
     impl SourceFile {
-        pub(crate) fn name(&self) -> &str {
+        pub(crate) fn human_name(&self) -> &str {
             self.path.file_name()
                 .unwrap_or(&OsStr::new("{unknown}"))
                 .to_str()
@@ -254,10 +267,10 @@ mod cli {
 
     use std::path::PathBuf;
 
-    pub(crate) const VERSION: &str = "rough 0.0.1 (experimental build)";
+    pub(crate) const VERSION: &str = "rough 0.0.0";
 
     pub(crate) const HELP: &str = r#"
-Usage: rh <file> [options]
+usage: rh <file> [options]
 
 [options]:
     -h --help                       Show the help menu
@@ -269,32 +282,43 @@ Usage: rh <file> [options]
 
 [mode]:
     build                           Build the program
-    run (default)                   Build the program, then run it
+    run (default)                   Interpret the program
     show-items                      Show the parsed item list
     show-ir                         Show the intermediate representation
 
 [verbosity]:
-    quiet
-    info (default)
-    all
+    quiet                           Shows only the output from your program.
+    info (default)                  Shows some basic infos.
+    debug                           Also shows timings.
 
-Example: rh main.rh --mode build --verbosity debug
-Written by Foxcirc.
+tldr:
+
+run `main.rh` (interpreted)
+$ rh main.rh
+
+build `main.rh` (compiled)
+$ rh main.rh -m build
+
+set the verbosity to `debug`
+$ rn main.rh -v debug
 "#;
 
     pub(crate) fn parse(mut args: impl Iterator<Item = String>) -> Result<Opts, CliError> {
 
         let mut opts = Opts::default();
 
+        // skip the first arg
+        args.next();
+
         loop {
             match args.next().as_deref() {
                 Some("-h" | "--help") => opts.help = Help::Info,
                 Some("--version")     => opts.help = Help::Version,
-                Some("-i" | "--input")  => opts.input = match args.next().as_deref() {
+                Some("-i" | "--input")  => opts.input = match args.next() {
                     Some(path) => PathBuf::from(path),
                     None => return Err(CliError::ExpectedPath)
                 },
-                Some("-o" | "--output") => opts.output = match args.next().as_deref() {
+                Some("-o" | "--output") => opts.output = match args.next() {
                     Some(path) => PathBuf::from(path),
                     None => return Err(CliError::ExpectedPath)
                 },
@@ -334,11 +358,11 @@ Written by Foxcirc.
 
     #[derive(Default)]
     pub(crate) struct Opts {
-        pub(crate) help: Help, // show help menu: -h, --help
-        pub(crate) input: PathBuf, // the input file to compile: [file], -i, --i [file]
-        pub(crate) output: PathBuf, // the output path: -o, --output [path]
-        pub(crate) mode: Mode, // what to do: -m, --mode [mode]
-        pub(crate) verbosity: Verbosity, // how verbose to be: -v , --verbose [verbosity]
+        pub(crate) help: Help,
+        pub(crate) input: PathBuf,
+        pub(crate) output: PathBuf,
+        pub(crate) mode: Mode,
+        pub(crate) verbosity: Verbosity,
     }
 
     impl Opts {

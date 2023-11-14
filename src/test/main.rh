@@ -4,18 +4,10 @@
 // }
 
 fn main {
-    1 2 add-intrinsic
-    3 eq if {
-        "YES"
-    } else {
-        "NO"
-    }
-    ~
-    5 10 & add-assign
+    1 2 just-add ~
 }
 
-// <int ptr<int>>
-fn add-assign <variadic> {
-    ptr-read rot3 add swap ptr-write
+fn just-add (variadic) {
+    add
 }
 

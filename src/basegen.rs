@@ -3,7 +3,7 @@
 use std::{fmt, collections::HashMap, path::PathBuf, borrow::Cow};
 use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, FunDef}, diagnostic::Diagnostic, arch::Intrinsic};
 
-pub(crate) fn codegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
+pub(crate) fn basegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
 
     let mut part = Symbols::default();
 
@@ -61,6 +61,8 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Type   => todo!(),
             OpKind::Size   => todo!(),
             OpKind::Access => todo!(),
+
+            OpKind::Arrow => state.bytecode.push(Instr::spanned(InstrKind::Arrow, op.span)),
 
             OpKind::Add => state.bytecode.push(Instr::spanned(InstrKind::Add, op.span)),
             OpKind::Sub => state.bytecode.push(Instr::spanned(InstrKind::Sub, op.span)),
@@ -176,6 +178,8 @@ pub(crate) enum InstrKind<I> {
 
     // Access,
 
+    Arrow,
+
     Add,
     Sub,
     Mul,
@@ -249,8 +253,17 @@ pub(crate) struct Program<I> {
     pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
+
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
 pub(crate) type BytecodeSlice<I> = [Instr<I>];
+
+fn find_instr_kind<I: Intrinsic>(bytecode: &BytecodeSlice<I>, instr_kind: InstrKind<I>) -> Option<usize> {
+    bytecode.iter().position(|item| item.kind == instr_kind)
+}
+
+fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer: Producer) -> Option<usize> {
+    find_instr_kind(bytecode, InstrKind::Label { label, producer })
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct FunWithMetadata<I> {

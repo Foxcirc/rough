@@ -6,7 +6,9 @@ This is the rough specification for now.
 - `-`  swap
 - `+`  over
 - `*`  copy
-- `~`  ptr-read
+- `~`  drop
+- `>`  ptr-read
+- `<`  ptr-write
 - `//` one line comment
 - `/*` inline comment
 - `#`  ???
@@ -17,13 +19,14 @@ This is the rough specification for now.
 - `!`  size-of
 - `:`  access
 - `.`  addr-of-word
+- `,`  ignored, just sugar
 
 # Brackets
 
-- `<>` inline tuple
-- `()` ???
+- `<>` ???
+- `()` inline tuple
 - `{}` code block
-- `[]` ???
+- `[]` attribute
 
 # Keywords
 
@@ -38,8 +41,8 @@ This is the rough specification for now.
 - `loop` while-true loop
 - `break` break out of loop
 - `ret` return from fn
-- `move` move read variable (move~)
-- `cascading` define cascadig variable (cascading=)
+- `[move]` move read variable
+- `[cascading]` define cascadig variable
 - `constructor` constructor fn definition
 - `destructor` destructor fn definition
 
@@ -74,47 +77,58 @@ This is the rough specification for now.
 - `enum` tagged union with named fields
 - `union` unchecked variant type
 
+## Function pointers
+
+- `Fn` a function pointer
+
+A function pointer can be concretely typed.
+`Fn of (int int -> int)`
+`Fn` will return it's signature as it's generics list, including the `->`.
+
 ## Other builtin types
 
-- `type` the type of types (typeof(int))
+- `Type` the type of types (typeof(int))
 - `zero` monostate zero-sized type
 
 ## Hint types for signatures
 
-- `any` signal to `sign` that any type is valid here
-- `variadic` signal to `sign` that this signature is typechecked by the user
-- `->` signal to `sign` that the following values are the retured
+- `any` (any) signal to `sign` that any type is valid here
+- `variadic` (variadic) signal to `sign` that this signature is typechecked by the user
+- `->` (arrow) signal to `sign` that the following values are the retured
+- `of` (of) signal to `sign` that the following value are the generics
+
+The values of `any, variadic, arrow and of` are all their own types, which have exactly
+one state and are all zero-sized.
 
 ## Self type
 
 - `self` defined by the type implemented inside `impl`
 
-new any <zero>
+### Example
+
+new any (zero)
 
 impl any {
-    constructor new <-> self> {
+    constructor new (-> self) {
         zero
     }
 }
 
-new Box <struct<
-    ptr<any> member= data
-    ptr<Allocator> comptime member= allocator
->>
+new Box (struct of (
+    ptr of any [member] = data
+    ptr of Allocator comptime-only [member] = allocator
+))
 
 impl Box {
-    constructor new <any -> self> {
+    constructor new (any -> self) {
         ... member= data
         allocator~ member= allocator
         struct:from-members
     }
-    fn from-1 <any -> self> {
-        Box:new
+    fn from-1 (any -> self) {
+        self:new
     }
-    fn repr <int -> str> {
-        
-    },
-    destructor <self> {
+    destructor (self) {
         // deallocate memory
         // something like this
         data move~ allocator move~ :dealloc
@@ -124,4 +138,8 @@ impl Box {
 42 Box:new
 Box:repr
 Box:into-inner
+
+# Notes
+
+All of this is work in progress.
 

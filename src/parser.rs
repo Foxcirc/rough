@@ -69,9 +69,12 @@ pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
 
 pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
     context("expected signature", delimited(
-        char('<'),
-        many0(parse_op),
-        char('>')
+        char('('),
+        alt((
+            value(Vec::new(), tag("variadic")),
+            many0(delimited(multispace0, parse_op, multispace0))
+        )),
+        char(')')
     ))(dat)
 }
 
@@ -92,14 +95,15 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
                 value(OpKind::Over,   char('+')),
                 value(OpKind::Swap,   char('-')),
                 value(OpKind::Addr,   char('&')),
+                value(OpKind::Read,   char('>')),
+                value(OpKind::Write,  char('<')),
                 value(OpKind::Type,   char('?')),
-                value(OpKind::Size,   char('!')),
+                value(OpKind::Size,   char('!')), // todo: use ! for something different
                 value(OpKind::Access, char(':')),
+                value(OpKind::Arrow,  tag("->")),
                 value(OpKind::Rot3,   terminated(tag("rot3"),   multispace1)),
                 value(OpKind::Rot4,   terminated(tag("rot4"),   multispace1)),
-                value(OpKind::Move,   terminated(tag("move~"),  multispace1)),
-                value(OpKind::Write,  terminated(tag("write~"), multispace1)),
-                value(OpKind::Read,   char('~')),
+                // value(OpKind::Move,   terminated(tag("move~"),  multispace1)),
             )),
             alt((
                 value(OpKind::Add, terminated(tag("add"), multispace1)),
@@ -211,9 +215,9 @@ pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
 
 pub(crate) fn parse_tuple_literal(dat: ParseInput) -> ParseResult<Vec<Op>> {
     delimited(
-        char('<'),
+        char('('),
         many0(delimited(multispace0, parse_op, multispace0)),
-        char('>')
+        char(')')
     )(dat)
 }
 
@@ -348,6 +352,8 @@ pub(crate) enum OpKind {
     Type,
     Size,
     Access,
+
+    Arrow,
 
     Add,
     Sub,
