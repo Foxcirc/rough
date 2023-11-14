@@ -3,6 +3,7 @@
 pub(crate) mod test;
 
 pub mod diagnostic;
+pub mod arena;
 pub mod parser;
 pub mod basegen;
 pub mod typegen;
@@ -221,6 +222,7 @@ pub(crate) mod parse_modules {
                 uses: module_map,
                 funs: items.funs,
                 types: items.types,
+                arena: items.arena,
             }
         });
 

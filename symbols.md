@@ -89,6 +89,7 @@ A function pointer can be concretely typed.
 
 - `Type` the type of types (typeof(int))
 - `zero` monostate zero-sized type
+- `atomic` atomic wrapper type
 
 ## Hint types for signatures
 
@@ -138,6 +139,20 @@ impl Box {
 42 Box:new
 Box:repr
 Box:into-inner
+
+# Strings
+
+- `str` the string type, equivalent to list of char for now
+
+The type of string literals is `str` but they do not allocate using the `allocator`.
+
+# Useful std types
+
+- `box` a unique pointer (allocates)
+- `rc` a reference counted shared pointer (allocates)
+- `chk` enables compile time borrow checking
+- `list` a sequencial list (allocates)
+- `linked-list` a linked list (allocates)
 
 # Notes
 

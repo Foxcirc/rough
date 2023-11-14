@@ -1,7 +1,7 @@
 
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
-use crate::diagnostic;
+use crate::{diagnostic, arena};
 
 pub(crate) fn parse(dat: &str) -> Result<ParseTranslationUnit, ParseError> {
     parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
@@ -62,18 +62,27 @@ pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
     map(
         tuple((
             preceded(multispace0, cut(parse_ident)),
+            preceded(multispace0, cut(parse_partial_signature)),
         )),
-        |_| Item::TypeDef(Type::Int)
+        |(name, inner)| Item::TypeDef(TypeDef { name, signature: inner, span: Span::from_located_span(&dat) })
     )(dat)
+}
+
+pub(crate) fn parse_partial_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
+    context("expected partial signature", delimited(
+        char('('),
+        cut(many0(delimited(multispace0, parse_op, multispace0))),
+        char(')')
+    ))(dat)
 }
 
 pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
     context("expected signature", delimited(
         char('('),
-        alt((
+        cut(alt((
             value(Vec::new(), tag("variadic")),
             many0(delimited(multispace0, parse_op, multispace0))
-        )),
+        ))),
         char(')')
     ))(dat)
 }
@@ -265,11 +274,12 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
     (before, target, after)
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Default)]
 pub(crate) struct TranslationUnit<U> { // todo: dont use generics here :/
     pub uses: U,
     pub funs: Vec<FunDef>,
-    pub types: Vec<Type>,
+    pub types: Vec<TypeDef>,
+    pub arena: arena::StrArena,
 }
 
 pub(crate) type ParseTranslationUnit = TranslationUnit<Vec<Use>>;
@@ -280,7 +290,7 @@ pub(crate) enum Item {
     Comment,
     Use(Use),
     FunDef(FunDef),
-    TypeDef(Type),
+    TypeDef(TypeDef),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -297,14 +307,21 @@ pub(crate) struct FunDef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TypeDef {
+    pub name: IdentStr,
+    pub span: Span,
+    pub signature: Vec<Op>, // todo: ByteCode?
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
-    // special Any type used for typechecking
-    Any,
+    // special type used for typechecking
+    // Any,
     // standard types
     Int,
-    Bool,
-    Char,
-    Ptr { inner: Box<Type> }, // todo: add slice type
+    // Bool,
+    // Char,
+    // Ptr { inner: Box<Type> }, // todo: add slice type
     // fine-grained integer types
     // U8,
     // U16,
@@ -315,9 +332,9 @@ pub(crate) enum Type {
     // I32,
     // I64,
     // type
-    Type,
+    // Type,
     // complex types
-    Array { inner: Box<Type>, length: usize },
+    // Array { inner: Box<Type>, length: usize },
     // Tuple { inner: Vec<Type> },
     // user types (newtype)
     // New { name: &'a str, size: u64 }
