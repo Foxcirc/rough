@@ -44,10 +44,12 @@ fn main() {
     let parsing_start_time = time::Instant::now();
 
     let mut source = parse_modules::SourceList::default();
-
     match parse_modules::parse_modules(&mut source, opts.input.clone()) {
         Ok(()) => (),
         Err(diag) => {
+            if opts.debug() {
+                Diagnostic::debug("parsing failed").emit();
+            }
             diag.emit();
             return
         },
@@ -190,7 +192,7 @@ pub(crate) mod parse_modules {
             return Ok(())
         }
 
-        state.visited.insert(Clone::clone(&path));
+        state.visited.insert(path.clone());
 
         let (base, file_name) = split_file_name(&path)?;
 
