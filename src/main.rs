@@ -43,9 +43,9 @@ fn main() {
 
     let parsing_start_time = time::Instant::now();
 
-    let mut state = parse_modules::State::default();
+    let mut source = parse_modules::SourceList::default();
 
-    match parse_modules::parse_modules(&mut state, opts.input.clone()) {
+    match parse_modules::parse_modules(&mut source, opts.input.clone()) {
         Ok(()) => (),
         Err(diag) => {
             diag.emit();
@@ -53,12 +53,10 @@ fn main() {
         },
     };
 
-    let source_files = state.source_files;
-
     if opts.debug() {
-        let files: Vec<_> = source_files.iter().map(|item| item.human_name()).collect();
-        let how_many = source_files.len();
-        let what = if source_files.len() == 1 { "file" } else { "files" };
+        let files: Vec<_> = source.files.iter().map(|item| item.human_name()).collect();
+        let how_many = source.files.len();
+        let what = if source.files.len() == 1 { "file" } else { "files" };
         Diagnostic::debug("parsing done")
             .note(format!("took {:?}", time::Instant::now() - parsing_start_time))
             .note(format!("{} {}: {}", how_many, what, files.join(", ")))
@@ -69,11 +67,11 @@ fn main() {
 
     let mut symbols: Symbols<arch::Intel64> = Symbols::default();
 
-    for source_file in source_files.into_iter() {
+    for source_file in source.files.into_iter() {
 
         let name = source_file.human_name().to_string();
 
-        let part = match basegen::basegen(&source_file.path, source_file.items.funs) { // todo: add debug timings for codegen
+        let part = match basegen::basegen(&source_file.path, source_file.items.funs, &source.arena) { // todo: add debug timings for codegen
             Ok(val) => val,
             Err(err) => {
                 if opts.debug() {
@@ -90,6 +88,8 @@ fn main() {
         symbols.funs.extend(part.funs);
 
     }
+
+    symbols.arena = source.arena;
 
     let program = match typegen::typecheck(symbols) {
         Ok(val) => val,
@@ -166,7 +166,7 @@ pub(crate) mod arch {
 
 fn debug_print_program<I: fmt::Debug>(program: &Program<I>) {
     for (name, fun) in program.funs.iter() {
-        eprintln!("fn {} (file {}):", name, fun.file_name);
+        eprintln!("fn {} (file {}):", program.arena.get(*name), fun.file_name);
         for (idx, instruction) in fun.body.iter().enumerate() {
             eprintln!("{:3}: {:?}", idx, instruction);
         }
@@ -176,17 +176,17 @@ fn debug_print_program<I: fmt::Debug>(program: &Program<I>) {
 pub(crate) mod parse_modules {
 
     use std::{path::{PathBuf, Path}, ffi::OsStr, fs, collections::{HashSet, HashMap, VecDeque}};
-    use crate::{parser::{self, TranslationUnit}, diagnostic::Diagnostic};
+    use crate::{parser::{self, TranslationUnit}, diagnostic::Diagnostic, arena};
 
-    pub(crate) fn parse_modules(state: &mut State, path: PathBuf) -> Result<(), Diagnostic> {
+    pub(crate) fn parse_modules(state: &mut SourceList, path: PathBuf) -> Result<(), Diagnostic> {
 
         if state.visited.contains(&path) {
-            let idx = state.source_files.iter()
+            let idx = state.files.iter()
                 .position(|item: &SourceFile| &item.path == &path)
                 .expect("visited path not found");
             // move this entry to the last position
-            let item = state.source_files.remove(idx).expect("invalid index");
-            state.source_files.push_front(item);
+            let item = state.files.remove(idx).expect("invalid index");
+            state.files.push_front(item);
             return Ok(())
         }
 
@@ -199,7 +199,7 @@ pub(crate) mod parse_modules {
             Err(err) => return Err(Diagnostic::error("cannot read file").note(err.to_string()).file(file_name))
         };
 
-        let items = match parser::parse(&content) {
+        let items = match parser::parse(&content, &mut state.arena) {
             Ok(val) => val,
             Err(err) => return Err(parser::format_error(err).file(file_name)),
         };
@@ -208,7 +208,7 @@ pub(crate) mod parse_modules {
 
         for item in items.uses {
 
-            let module_name = &item.path;
+            let module_name = state.arena.get(item.path).to_string();
             let module_path = base.join(module_name);
             module_map.insert(item, module_path.clone());
 
@@ -216,13 +216,12 @@ pub(crate) mod parse_modules {
 
         }
 
-        state.source_files.push_back(SourceFile {
+        state.files.push_back(SourceFile {
             path,
             items: ModuleTranslationUnit {
                 uses: module_map,
                 funs: items.funs,
                 types: items.types,
-                arena: items.arena,
             }
         });
 
@@ -239,9 +238,10 @@ pub(crate) mod parse_modules {
     }
 
     #[derive(Default)]
-    pub(crate) struct State {
+    pub(crate) struct SourceList {
         pub(crate) visited: HashSet<PathBuf>,
-        pub(crate) source_files: VecDeque<SourceFile>,
+        pub(crate) files: VecDeque<SourceFile>,
+        pub(crate) arena: arena::StrArena,
     }
 
     #[derive(Debug)]

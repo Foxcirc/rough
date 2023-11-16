@@ -3,8 +3,12 @@ use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delim
 use nom_locate::LocatedSpan;
 use crate::{diagnostic, arena};
 
-pub(crate) fn parse(dat: &str) -> Result<ParseTranslationUnit, ParseError> {
-    parse_items(LocatedSpan::new(dat)).finish().map(|(_, items)| items)
+pub(crate) fn parse<'d>(dat: &'d str, arena: &'d mut arena::StrArena) -> Result<ParseTranslationUnit, ParseError<'d>> {
+    parse_items(LocatedSpan::new_extra(dat, arena as &arena::StrArena)).finish().map(
+        move |result| {
+            result.1
+        }
+    )
 }
 
 pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ParseTranslationUnit> {
@@ -16,8 +20,8 @@ pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ParseTranslationUnit> 
 
 fn assign_item<'a>(mut dest: ParseTranslationUnit, item: Item) -> ParseTranslationUnit {
     match item {
-        Item::Comment   => (),
-        Item::Use(val)  => dest.uses.push(val),
+        Item::Comment      => (),
+        Item::Use(val)     => dest.uses.push(val),
         Item::FunDef(val)  => dest.funs.push(val),
         Item::TypeDef(val) => dest.types.push(val),
     }
@@ -231,7 +235,7 @@ pub(crate) fn parse_tuple_literal(dat: ParseInput) -> ParseResult<Vec<Op>> {
 }
 
 pub(crate) type ParseResult<'a, O> = IResult<ParseInput<'a>, O, ParseError<'a>>;
-pub(crate) type ParseInput<'a> = LocatedSpan<&'a str>; // todo convert to LocatedSpan<str> for use with convert_error
+pub(crate) type ParseInput<'a> = LocatedSpan<&'a str, &'a arena::StrArena>;
 pub(crate) type ParseError<'a> = VerboseError<ParseInput<'a>>;
 
 pub(crate) fn format_error(value: ParseError) -> diagnostic::Diagnostic {
@@ -279,7 +283,6 @@ pub(crate) struct TranslationUnit<U> { // todo: dont use generics here :/
     pub uses: U,
     pub funs: Vec<FunDef>,
     pub types: Vec<TypeDef>,
-    pub arena: arena::StrArena,
 }
 
 pub(crate) type ParseTranslationUnit = TranslationUnit<Vec<Use>>;
@@ -406,15 +409,13 @@ pub(crate) enum Literal {
     Tuple(Vec<Op>),
 }
 
-pub(crate) type IdentStr = String;
+pub(crate) type IdentStr = arena::Id;
 
-fn to_identstr(value: ParseInput) -> String {
-    value.fragment().to_string()
+fn to_identstr(value: ParseInput) -> IdentStr {
+    value.extra.put(value.fragment()) // allocate the literal inside the arena
 }
 
-// todo: store everything more efficiently (Arena, Pinned Buffer?) (bumpalo, blink_alloc?)
-
-#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)] // todo: do we really need this much derives on all of the types
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)] // todo: do we really need this many derives on all of the types
 pub(crate) struct Span {
     pub(crate) offset: u32,
     pub(crate) line: u32,

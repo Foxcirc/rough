@@ -1,15 +1,15 @@
 
 
 use std::{fmt, collections::HashMap, path::PathBuf, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, FunDef}, diagnostic::Diagnostic, arch::Intrinsic};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, FunDef}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
-pub(crate) fn basegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
+pub(crate) fn basegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>, arena: &arena::StrArena) -> Result<Symbols<I>, CodegenError> {
 
     let mut part = Symbols::default();
 
     for item in funs.into_iter() {
 
-        let mut state = State::<I>::default();
+        let mut state = State::<I>::with_arena(arena);
         codegen_block(&mut state, item.body, None)?;
         state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
 
@@ -37,7 +37,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Push { value } => state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
 
             OpKind::Call { name }  => {
-                let inrinsic = I::generate(&name);
+                let inrinsic = I::generate(&*state.arena.get(name));
                 let result = match inrinsic {
                     Some(val) => InstrKind::Intrinsic(val),
                     None => InstrKind::Call { to: name }
@@ -213,21 +213,20 @@ pub(crate) enum Producer {
     Break,
 }
 
-struct State<I> {
+struct State<'a, I> {
     pub bytecode: Vec<Instr<I>>,
     pub counter: usize,
+    pub arena: &'a arena::StrArena
 }
 
-impl<I> Default for State<I> {
-    fn default() -> Self {
+impl<'a, I> State<'a, I> {
+    fn with_arena(arena: &'a arena::StrArena) -> Self {
         Self {
             bytecode: Vec::new(),
-            counter: 0
+            counter: 0,
+            arena
         }
     }
-}
-
-impl<I> State<I> {
     pub fn next_label(&mut self) -> usize {
         self.counter += 1;
         self.counter
@@ -237,6 +236,7 @@ impl<I> State<I> {
 pub(crate) struct Symbols<I> {
     pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
+    pub arena: arena::StrArena,
 }
 
 // cannot derive Default because of the generics
@@ -245,6 +245,7 @@ impl<I> Default for Symbols<I> {
         Self {
             funs: HashMap::new(),
             types: HashMap::new(),
+            arena: Default::default(),
         }
     }
 }
@@ -252,6 +253,7 @@ impl<I> Default for Symbols<I> {
 pub(crate) struct Program<I> {
     pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
+    pub arena: arena::StrArena,
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;

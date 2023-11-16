@@ -1,32 +1,30 @@
 
-use std::fmt;
+use std::{fmt, cell::{RefCell, Ref}};
 
 const INVALID_ID: &str = "invalid id for this arena";
 
 #[derive(Default)]
 pub(crate) struct StrArena {
-    buffer: Vec<u8>,
+    buffer: RefCell<Vec<u8>>,
 }
 
 impl StrArena {
 
-    pub fn with_capacity(cap: usize) -> Self {
-        Self {
-            buffer: Vec::with_capacity(cap),
-        }
-    }
-
-    pub fn put(&mut self, val: &str) -> Id {
-        let from = self.buffer.len() as u32;
+    pub fn put(&self, val: &str) -> Id {
+        let mut mut_buffer = self.buffer.borrow_mut();
+        let from = mut_buffer.len() as u32;
         let to   = from + val.len() as u32;
-        self.buffer.copy_from_slice(val.as_bytes());
+        (*mut_buffer).copy_from_slice(val.as_bytes());
         Id { from, to }
     }
 
-    pub fn get(&self, id: Id) -> &str {
-        std::str::from_utf8(
-            &self.buffer.get(id.from as usize .. id.to as usize).expect(INVALID_ID)
-        ).expect(INVALID_ID)
+    pub fn get<'a>(&'a self, id: Id) -> Ref<'a, str> {
+        let buffer = self.buffer.borrow();
+        Ref::map(buffer, |val| {
+            std::str::from_utf8(
+                val.get(id.from as usize .. id.to as usize).expect(INVALID_ID)
+            ).expect(INVALID_ID)
+        })
     }
 
 }
@@ -37,6 +35,7 @@ impl fmt::Debug for StrArena {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] // todo: remove eq, hash etc. derive
 pub(crate) struct Id {
     from: u32,
     to: u32,
