@@ -8,6 +8,10 @@ pub(crate) fn parse<'d>(dat: &'d str) -> Result<ParseTranslationUnit, FinalParse
     parse_items(LocatedSpan::new_extra(dat, &arena)).finish()
         .map_err(|err| ignore_extra(err))
         .map(|res| res.1)
+        .map(move |mut res| {
+            res.arena = arena;
+            res
+        })
 }
 
 fn ignore_extra<'a, 'b>(val: ParseError<'a, 'b>) -> FinalParseError<'a> {
