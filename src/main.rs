@@ -9,7 +9,8 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, time, fmt, fs};
+use std::{env, time, fmt, fs, path, thread, sync::Arc};
+use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
 
@@ -39,70 +40,19 @@ fn main() {
         Ok(opts) => opts,
     };
 
-    // start discovering and parsing the project's dependencies
+    let path = opts.input.clone();
+    let opts_arc = Arc::new(opts);
 
-    // let parsing_start_time = time::Instant::now();
+    // asynchronously compile the input file
+    let receiver = compile::<Intel64>(Arc::clone(&opts_arc), path);
+    let program = receiver.recv().unwrap();
 
-    let data = match fs::read_to_string(&opts.input) {
-        Ok(val) => val,
-        Err(err) => {
-            Diagnostic::error("cannot read input file")
-                .note(err.to_string())
-                .emit();
-            return
-        }
-    };
-
-    let input_file_name = opts.input.file_name().expect("invalid input file path").to_string_lossy();
-
-    let source = match parser::parse(&data) {
-        Ok(val) => val,
-        Err(err) => {
-            parser::format_error(err)
-                .file(input_file_name)
-                .emit();
-            return
-        }
-    };
-
-    // if opts.debug() {
-    //     Diagnostic::debug("parsing done")
-    //         .note(format!("took {:?}", time::Instant::now() - parsing_start_time))
-    //         .emit();
-    // }
-
-    // we now need to genrate code for the source files
-
-    let symbols = match basegen::basegen::<arch::Intel64>(source) { // todo: add debug timings for codegen
-        Ok(val) => val,
-        Err(err) => {
-            if opts.debug() {
-                Diagnostic::debug("codegen failed").emit();
-            }
-            basegen::format_error(err)
-                .file(input_file_name)
-                .emit();
-            return
-        }
-    };
-
-    let program = match typegen::typecheck(symbols) {
-        Ok(val) => val,
-        Err(err) => {
-            if opts.debug() {
-                Diagnostic::debug("typecheck failed").emit();
-            }
-            typegen::format_error(err).emit();
-            return;
-        }
-    };
-
-    if matches!(opts.mode, cli::Mode::ShowIr) {
+    if matches!(opts_arc.mode, cli::Mode::ShowIr) {
         Diagnostic::debug("showing intermediate representation").emit();
         debug_print_program(&program);
     }
 
-    if matches!(opts.mode, cli::Mode::Build | cli::Mode::Run) {
+    if matches!(opts_arc.mode, cli::Mode::Run) {
 
         match eval::eval(program) {
             Ok(()) => (),
@@ -113,6 +63,89 @@ fn main() {
         }
 
     }
+
+}
+
+fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::PathBuf) -> crossbeam_channel::Receiver<Program<I>> { // todo: use &'s Opts
+
+    let file_name = path.file_stem().expect("invalid input file path").to_string_lossy().to_string();
+
+    if opts.debug() {
+        Diagnostic::debug(format!("compiling module `{}`", file_name)).emit();
+    }
+
+    let (sender, receiver) = crossbeam_channel::bounded(1);
+
+    thread::Builder::new().stack_size(128 * 1024).name(format!("worker for module `{}`", file_name)).spawn(move || {
+
+        let data = match fs::read_to_string(&path) {
+            Ok(val) => val,
+            Err(err) => {
+                Diagnostic::error("cannot read input file")
+                    .note(err.to_string())
+                    .emit();
+                return
+            }
+        };
+
+        let source = match parser::parse(&data) {
+            Ok(val) => val,
+            Err(err) => {
+                parser::format_error(err)
+                    .file(file_name)
+                    .emit();
+                return
+            }
+        };
+
+        let mut deps = Vec::new();
+
+        for module in source.uses.iter() {
+
+            let module_path = path.join(source.arena.get(module.path));
+            let receiver = compile::<I>(Arc::clone(&opts), module_path);
+            deps.push(receiver);
+
+        }
+
+        let mut compiled = Vec::new();
+
+        for dep in deps {
+            let code = dep.recv().unwrap();
+            compiled.push(code);
+        }
+
+        // we now need to genrate code for the source files
+
+        let symbols = match basegen::basegen(source) { // todo: add debug timings for codegen
+            Ok(val) => val,
+            Err(err) => {
+                if opts.debug() {
+                    Diagnostic::debug("codegen failed").emit();
+                }
+                basegen::format_error(err)
+                    .file(file_name)
+                    .emit();
+                return
+            }
+        };
+
+        let program = match typegen::typecheck(symbols) {
+            Ok(val) => val,
+            Err(err) => {
+                if opts.debug() {
+                    Diagnostic::debug("typecheck failed").emit();
+                }
+                typegen::format_error(err).emit();
+                return;
+            }
+        };
+
+        sender.send(program).unwrap();
+
+    }).unwrap();
+
+    receiver
 
 }
 
