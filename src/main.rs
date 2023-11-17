@@ -9,8 +9,8 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, time, fmt};
-use basegen::{Symbols, Program};
+use std::{env, time, fmt, fs};
+use basegen::Program;
 use diagnostic::Diagnostic;
 
 fn main() {
@@ -43,55 +43,50 @@ fn main() {
 
     let parsing_start_time = time::Instant::now();
 
-    let mut source = parse_modules::SourceList::default();
-    match parse_modules::parse_modules(&mut source, opts.input.clone()) {
-        Ok(()) => (),
-        Err(diag) => {
-            if opts.debug() {
-                Diagnostic::debug("parsing failed").emit();
-            }
-            diag.emit();
+    let data = match fs::read_to_string(&opts.input) {
+        Ok(val) => val,
+        Err(err) => {
+            Diagnostic::error("cannot read input file")
+                .note(err.to_string())
+                .emit();
             return
-        },
+        }
+    };
+
+    let input_file_name = opts.input.file_name().expect("invalid input file path").to_string_lossy();
+
+    let mut arena = arena::StrArena::default();
+
+    let source = match parser::parse(&data, &mut arena) {
+        Ok(val) => val,
+        Err(err) => {
+            parser::format_error(err)
+                .file(input_file_name)
+                .emit();
+            return
+        }
     };
 
     if opts.debug() {
-        let files: Vec<_> = source.files.iter().map(|item| item.human_name()).collect();
-        let how_many = source.files.len();
-        let what = if source.files.len() == 1 { "file" } else { "files" };
         Diagnostic::debug("parsing done")
             .note(format!("took {:?}", time::Instant::now() - parsing_start_time))
-            .note(format!("{} {}: {}", how_many, what, files.join(", ")))
             .emit();
     }
 
     // we now need to genrate code for the source files
 
-    let mut symbols: Symbols<arch::Intel64> = Symbols::default();
-
-    for source_file in source.files.into_iter() {
-
-        let name = source_file.human_name().to_string();
-
-        let part = match basegen::basegen(&source_file.path, source_file.items.funs, &source.arena) { // todo: add debug timings for codegen
-            Ok(val) => val,
-            Err(err) => {
-                if opts.debug() {
-                    Diagnostic::debug("codegen failed").emit();
-                }
-                basegen::format_error(err)
-                    .file(name)
-                    .emit();
-                return
+    let mut symbols = match basegen::basegen::<arch::Intel64>(&arena, source.funs) { // todo: add debug timings for codegen
+        Ok(val) => val,
+        Err(err) => {
+            if opts.debug() {
+                Diagnostic::debug("codegen failed").emit();
             }
-        };
-
-        symbols.types.extend(part.types);
-        symbols.funs.extend(part.funs);
-
-    }
-
-    symbols.arena = source.arena;
+            basegen::format_error(err)
+                .file(input_file_name)
+                .emit();
+            return
+        }
+    };
 
     let program = match typegen::typecheck(symbols) {
         Ok(val) => val,
@@ -168,103 +163,11 @@ pub(crate) mod arch {
 
 fn debug_print_program<I: fmt::Debug>(program: &Program<I>) {
     for (name, fun) in program.funs.iter() {
-        eprintln!("fn {} (file {}):", program.arena.get(*name), fun.file_name);
+        eprintln!("fn {}:", program.arena.get(*name));
         for (idx, instruction) in fun.body.iter().enumerate() {
             eprintln!("{:3}: {:?}", idx, instruction);
         }
     }
-}
-
-pub(crate) mod parse_modules {
-
-    use std::{path::{PathBuf, Path}, ffi::OsStr, fs, collections::{HashSet, HashMap, VecDeque}};
-    use crate::{parser::{self, TranslationUnit}, diagnostic::Diagnostic, arena};
-
-    pub(crate) fn parse_modules(state: &mut SourceList, path: PathBuf) -> Result<(), Diagnostic> {
-
-        if state.visited.contains(&path) {
-            let idx = state.files.iter()
-                .position(|item: &SourceFile| &item.path == &path)
-                .expect("visited path not found");
-            // move this entry to the last position
-            let item = state.files.remove(idx).expect("invalid index");
-            state.files.push_front(item);
-            return Ok(())
-        }
-
-        state.visited.insert(path.clone());
-
-        let (base, file_name) = split_file_name(&path)?;
-
-        let content = match fs::read_to_string(&path) {
-            Ok(val) => val,
-            Err(err) => return Err(Diagnostic::error("cannot read file").note(err.to_string()).file(file_name))
-        };
-
-        let items = match parser::parse(&content, &mut state.arena) {
-            Ok(val) => val,
-            Err(err) => return Err(parser::format_error(err).file(file_name)),
-        };
-
-        let mut module_map = HashMap::new();
-
-        for item in items.uses {
-
-            let module_name = state.arena.get(item.path).to_string();
-            let module_path = base.join(module_name);
-            module_map.insert(item, module_path.clone());
-
-            parse_modules(state, module_path)?;
-
-        }
-
-        state.files.push_back(SourceFile {
-            path,
-            items: ModuleTranslationUnit {
-                uses: module_map,
-                funs: items.funs,
-                types: items.types,
-            }
-        });
-
-        Ok(())
-
-    }
-
-    fn split_file_name(path: &Path) -> Result<(&Path, &str), Diagnostic> {
-        Ok((
-            path.parent().ok_or(Diagnostic::error("invalid input file pah"))?,
-            path.file_name().ok_or(Diagnostic::error("invalid input file path"))
-                .and_then(|name| name.to_str().ok_or(Diagnostic::error("non-utf8 file name")))?
-        ))
-    }
-
-    #[derive(Default)]
-    pub(crate) struct SourceList {
-        pub(crate) visited: HashSet<PathBuf>,
-        pub(crate) files: VecDeque<SourceFile>,
-        pub(crate) arena: arena::StrArena,
-    }
-
-    #[derive(Debug)]
-    pub(crate) struct SourceFile {
-        pub(crate) path: PathBuf,
-        pub(crate) items: ModuleTranslationUnit
-    }
-
-    // todo: why is TranslationUnit generic over U??
-    // todo: rename "parser::Use" to something more meaningful
-    pub(crate) type ModuleTranslationUnit = TranslationUnit<HashMap<parser::Use, PathBuf>>;
-
-    impl SourceFile {
-        pub(crate) fn human_name(&self) -> &str {
-            self.path.file_name()
-                .unwrap_or(&OsStr::new("{unknown}"))
-                .to_str()
-                .expect("file name not valid utf8")
-        }
-    }
-
 }
 
 mod cli {

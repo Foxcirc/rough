@@ -1,9 +1,9 @@
 
 
-use std::{fmt, collections::HashMap, path::PathBuf, borrow::Cow};
+use std::{fmt, collections::HashMap, borrow::Cow};
 use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, FunDef}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
-pub(crate) fn basegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>, arena: &arena::StrArena) -> Result<Symbols<I>, CodegenError> {
+pub(crate) fn basegen<I: Intrinsic>(arena: &arena::StrArena, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
 
     let mut part = Symbols::default();
 
@@ -14,7 +14,6 @@ pub(crate) fn basegen<I: Intrinsic>(file_path: &PathBuf, funs: Vec<FunDef>, aren
         state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
 
         let fun = FunWithMetadata {
-            file_name: file_path.to_string_lossy().to_string(), // todo: rename all "human-only" things to smth like human_file_name
             signature: item.signature,
             body: state.bytecode,
         };
@@ -236,7 +235,6 @@ impl<'a, I> State<'a, I> {
 pub(crate) struct Symbols<I> {
     pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
-    pub arena: arena::StrArena,
 }
 
 // cannot derive Default because of the generics
@@ -245,7 +243,6 @@ impl<I> Default for Symbols<I> {
         Self {
             funs: HashMap::new(),
             types: HashMap::new(),
-            arena: Default::default(),
         }
     }
 }
@@ -253,7 +250,6 @@ impl<I> Default for Symbols<I> {
 pub(crate) struct Program<I> {
     pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
-    pub arena: arena::StrArena,
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
@@ -269,7 +265,6 @@ fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer:
 
 #[derive(Debug, Default)]
 pub(crate) struct FunWithMetadata<I> {
-    pub file_name: String,
     pub signature: Vec<Op>,
     pub body: Bytecode<I>,
 }

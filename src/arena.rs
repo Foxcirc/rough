@@ -5,7 +5,7 @@ const INVALID_ID: &str = "invalid id for this arena";
 
 #[derive(Default)]
 pub(crate) struct StrArena {
-    buffer: RefCell<Vec<u8>>,
+    buffer: RefCell<Vec<u8>>, // todo: do not use RefCell here, but wrap the StrArena inside a RefCrell when we use it inside the parser
 }
 
 impl StrArena {

@@ -4,11 +4,7 @@ use nom_locate::LocatedSpan;
 use crate::{diagnostic, arena};
 
 pub(crate) fn parse<'d>(dat: &'d str, arena: &'d mut arena::StrArena) -> Result<ParseTranslationUnit, ParseError<'d>> {
-    parse_items(LocatedSpan::new_extra(dat, arena as &arena::StrArena)).finish().map(
-        move |result| {
-            result.1
-        }
-    )
+    parse_items(LocatedSpan::new_extra(dat, arena as &arena::StrArena)).finish().map(|res| res.1)
 }
 
 pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ParseTranslationUnit> {
