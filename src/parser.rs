@@ -4,7 +4,7 @@ use nom_locate::LocatedSpan;
 use std::cell::RefCell;
 use crate::{diagnostic, arena};
 
-pub(crate) fn parse<'d>(dat: &'d str) -> Result<ParseTranslationUnit, FinalParseError<'d>> {
+pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit, FinalParseError<'d>> {
     let arena = RefCell::new(arena::StrArena::default());
     parse_items(LocatedSpan::new_extra(dat, &arena)).finish()
         .map_err(|err| ignore_extra(err))
@@ -22,14 +22,14 @@ fn ignore_extra<'a, 'b>(val: ParseError<'a, 'b>) -> FinalParseError<'a> {
         )).collect() }
 }
 
-pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, ParseTranslationUnit> {
+pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, TranslationUnit> {
     terminated(
         fold_many0(delimited(multispace0, parse_item, multispace0), TranslationUnit::default, assign_item),
         context("expected top level item", pair(multispace0, eof)) // this is there to allow empty files
     )(dat)
 }
 
-fn assign_item<'a>(mut dest: ParseTranslationUnit, item: Item) -> ParseTranslationUnit {
+fn assign_item<'a>(mut dest: TranslationUnit, item: Item) -> TranslationUnit {
     match item {
         Item::Comment      => (),
         Item::Use(val)     => dest.uses.push(val),
@@ -291,14 +291,13 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct TranslationUnit<U> { // todo: dont use generics here :/
-    pub uses: U,
+pub(crate) struct TranslationUnit {
+    pub uses: Vec<Use>,
     pub funs: Vec<FunDef>,
     pub types: Vec<TypeDef>,
     pub arena: arena::StrArena,
 }
 
-pub(crate) type ParseTranslationUnit = TranslationUnit<Vec<Use>>;
 pub(crate) type Block = Vec<Op>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

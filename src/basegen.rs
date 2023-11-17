@@ -1,9 +1,9 @@
 
 
 use std::{fmt, collections::HashMap, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, ParseTranslationUnit}, diagnostic::Diagnostic, arch::Intrinsic, arena};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, TranslationUnit}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
-pub(crate) fn basegen<I: Intrinsic>(source: ParseTranslationUnit) -> Result<Symbols<I>, CodegenError> {
+pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit) -> Result<Symbols<I>, CodegenError> {
 
     let mut part = Symbols::default();
 

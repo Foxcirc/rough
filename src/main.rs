@@ -41,7 +41,7 @@ fn main() {
 
     // start discovering and parsing the project's dependencies
 
-    let parsing_start_time = time::Instant::now();
+    // let parsing_start_time = time::Instant::now();
 
     let data = match fs::read_to_string(&opts.input) {
         Ok(val) => val,
@@ -65,11 +65,11 @@ fn main() {
         }
     };
 
-    if opts.debug() {
-        Diagnostic::debug("parsing done")
-            .note(format!("took {:?}", time::Instant::now() - parsing_start_time))
-            .emit();
-    }
+    // if opts.debug() {
+    //     Diagnostic::debug("parsing done")
+    //         .note(format!("took {:?}", time::Instant::now() - parsing_start_time))
+    //         .emit();
+    // }
 
     // we now need to genrate code for the source files
 
