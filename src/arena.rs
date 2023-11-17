@@ -1,32 +1,28 @@
 
-use std::{fmt, cell::{RefCell, Ref}};
+use std::fmt;
 
 const INVALID_ID: &str = "invalid id for this arena";
 
 #[derive(Default)]
 pub(crate) struct StrArena {
-    pub buffer: RefCell<Vec<u8>>, // todo: do not use RefCell here, but wrap the StrArena inside a RefCrell when we use it inside the parser
+    pub buffer: Vec<u8>,
 }
 
 impl StrArena {
 
-    pub fn put(&self, val: &str) -> Id {
-        let mut mut_buffer = self.buffer.borrow_mut();
-        let from = mut_buffer.len() as u32;
-        let to   = from + val.len() as u32 - 1;
-        mut_buffer.extend_from_slice(val.as_bytes());
+    pub fn put(&mut self, val: &str) -> Id {
+        let from = self.buffer.len() as u32;
+        let to = from + val.len() as u32 - 1;
+        self.buffer.extend_from_slice(val.as_bytes());
         dbg!(from, to, val.len());
         Id { from, to }
     }
 
-    pub fn get<'a>(&'a self, id: Id) -> Ref<'a, str> {
-        let buffer = self.buffer.borrow();
+    pub fn get<'a>(&'a self, id: Id) -> &'a str {
         dbg!(id.from, id.to);
-        Ref::map(buffer, |buf| {
-            std::str::from_utf8(
-                buf.get(id.from as usize .. id.to as usize).expect(INVALID_ID)
-            ).expect(INVALID_ID)
-        })
+        std::str::from_utf8(
+            &self.buffer.get(id.from as usize .. id.to as usize).expect(INVALID_ID)
+        ).expect(INVALID_ID)
     }
 
 }

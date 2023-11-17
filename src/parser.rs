@@ -1,15 +1,16 @@
 
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
+use std::cell::RefCell;
 use crate::{diagnostic, arena};
 
 pub(crate) fn parse<'d>(dat: &'d str) -> Result<ParseTranslationUnit, FinalParseError<'d>> {
-    let arena = arena::StrArena::default();
+    let arena = RefCell::new(arena::StrArena::default());
     parse_items(LocatedSpan::new_extra(dat, &arena)).finish()
         .map_err(|err| ignore_extra(err))
         .map(|res| res.1)
         .map(move |mut res| {
-            res.arena = arena;
+            res.arena = arena.into_inner();
             res
         })
 }
@@ -245,7 +246,7 @@ pub(crate) fn parse_tuple_literal<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResul
 }
 
 pub(crate) type ParseResult<'a, 'b, O> = IResult<ParseInput<'a, 'b>, O, ParseError<'a, 'b>>;
-pub(crate) type ParseInput<'a, 'b> = LocatedSpan<&'a str, &'b arena::StrArena>;
+pub(crate) type ParseInput<'a, 'b> = LocatedSpan<&'a str, &'b RefCell<arena::StrArena>>;
 pub(crate) type ParseError<'a, 'b> = VerboseError<ParseInput<'a, 'b>>;
 pub(crate) type FinalParseError<'a> = VerboseError<LocatedSpan<&'a str>>;
 
@@ -424,7 +425,8 @@ pub(crate) enum Literal {
 pub(crate) type IdentStr = arena::Id;
 
 fn to_identstr(value: ParseInput) -> IdentStr {
-    value.extra.put(value.fragment()) // allocate the literal inside the arena
+    let mut arena = value.extra.borrow_mut();
+    arena.put(value.fragment()) // allocate the literal inside the arena
 }
 
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)] // todo: do we really need this many derives on all of the types
