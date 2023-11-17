@@ -9,10 +9,11 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, time, fmt, fs, path, thread, sync::Arc};
+use std::{env, fmt, fs, path, sync::Arc};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
+use futures_lite::future;
 
 fn main() {
     
@@ -41,18 +42,28 @@ fn main() {
     };
 
     let path = opts.input.clone();
-    let opts_arc = Arc::new(opts);
+    let shared = Arc::new(SharedState {
+        opts,
+        executor: async_executor::Executor::new()
+    });
 
     // asynchronously compile the input file
-    let receiver = compile::<Intel64>(Arc::clone(&opts_arc), path);
-    let program = receiver.recv().unwrap();
 
-    if matches!(opts_arc.mode, cli::Mode::ShowIr) {
+    let receiver = compile::<Intel64>(Arc::clone(&shared), path);
+
+    let program = future::block_on(async {
+        while !shared.executor.is_empty() {
+            shared.executor.tick().await; // potential to add multithreading here
+        }
+        receiver.recv().await.unwrap()
+    });
+
+    if matches!(shared.opts.mode, cli::Mode::ShowIr) {
         Diagnostic::debug("showing intermediate representation").emit();
         debug_print_program(&program);
     }
 
-    if matches!(opts_arc.mode, cli::Mode::Run) {
+    if matches!(shared.opts.mode, cli::Mode::Run) {
 
         match eval::eval(program) {
             Ok(()) => (),
@@ -66,17 +77,18 @@ fn main() {
 
 }
 
-fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::PathBuf) -> crossbeam_channel::Receiver<Program<I>> { // todo: use &'s Opts
+fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: path::PathBuf) -> async_channel::Receiver<Program<I>> {
 
     let file_name = path.file_stem().expect("invalid input file path").to_string_lossy().to_string();
 
-    if opts.debug() {
+    if shared.opts.debug() {
         Diagnostic::debug(format!("compiling module `{}`", file_name)).emit();
     }
 
-    let (sender, receiver) = crossbeam_channel::bounded(1);
+    let (sender, receiver) = async_channel::bounded(1);
 
-    thread::Builder::new().stack_size(128 * 1024).name(format!("worker for module `{}`", file_name)).spawn(move || {
+    let clone = Arc::clone(&shared); // todo: Dont clone here (unecessary)
+    clone.executor.spawn(async move {
 
         let data = match fs::read_to_string(&path) {
             Ok(val) => val,
@@ -103,7 +115,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::
         for module in source.uses.iter() {
 
             let module_path = path.join(source.arena.get(module.path));
-            let receiver = compile::<I>(Arc::clone(&opts), module_path);
+            let receiver = compile::<I>(Arc::clone(&shared), module_path);
             deps.push(receiver);
 
         }
@@ -111,7 +123,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::
         let mut compiled = Vec::new();
 
         for dep in deps {
-            let code = dep.recv().unwrap();
+            let code = dep.recv().await.unwrap();
             compiled.push(code);
         }
 
@@ -120,7 +132,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::
         let symbols = match basegen::basegen(source) { // todo: add debug timings for codegen
             Ok(val) => val,
             Err(err) => {
-                if opts.debug() {
+                if shared.opts.debug() {
                     Diagnostic::debug("codegen failed").emit();
                 }
                 basegen::format_error(err)
@@ -133,7 +145,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::
         let program = match typegen::typecheck(symbols) {
             Ok(val) => val,
             Err(err) => {
-                if opts.debug() {
+                if shared.opts.debug() {
                     Diagnostic::debug("typecheck failed").emit();
                 }
                 typegen::format_error(err).emit();
@@ -141,12 +153,17 @@ fn compile<'s, I: Intrinsic + Send + 'static>(opts: Arc<cli::Opts>, path: path::
             }
         };
 
-        sender.send(program).unwrap();
+        sender.send(program).await.unwrap();
 
-    }).unwrap();
+    }).detach();
 
     receiver
 
+}
+
+struct SharedState<'a> {
+    pub opts: cli::Opts,
+    pub executor: async_executor::Executor<'a>,
 }
 
 pub(crate) mod arch {
