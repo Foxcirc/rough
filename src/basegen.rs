@@ -1,15 +1,15 @@
 
 
 use std::{fmt, collections::HashMap, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, FunDef}, diagnostic::Diagnostic, arch::Intrinsic, arena};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, ParseTranslationUnit}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
-pub(crate) fn basegen<I: Intrinsic>(arena: &arena::StrArena, funs: Vec<FunDef>) -> Result<Symbols<I>, CodegenError> {
+pub(crate) fn basegen<I: Intrinsic>(source: ParseTranslationUnit) -> Result<Symbols<I>, CodegenError> {
 
     let mut part = Symbols::default();
 
-    for item in funs.into_iter() {
+    for item in source.funs.into_iter() {
 
-        let mut state = State::<I>::with_arena(arena);
+        let mut state = State::<I>::with_arena(&source.arena);
         codegen_block(&mut state, item.body, None)?;
         state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
 

@@ -3,11 +3,21 @@ use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delim
 use nom_locate::LocatedSpan;
 use crate::{diagnostic, arena};
 
-pub(crate) fn parse<'d>(dat: &'d str, arena: &'d mut arena::StrArena) -> Result<ParseTranslationUnit, ParseError<'d>> {
-    parse_items(LocatedSpan::new_extra(dat, arena as &arena::StrArena)).finish().map(|res| res.1)
+pub(crate) fn parse<'d>(dat: &'d str) -> Result<ParseTranslationUnit, FinalParseError<'d>> {
+    let arena = arena::StrArena::default();
+    parse_items(LocatedSpan::new_extra(dat, &arena)).finish()
+        .map_err(|err| ignore_extra(err))
+        .map(|res| res.1)
 }
 
-pub(crate) fn parse_items(dat: ParseInput) -> ParseResult<ParseTranslationUnit> {
+fn ignore_extra<'a, 'b>(val: ParseError<'a, 'b>) -> FinalParseError<'a> {
+    VerboseError { errors: val.errors.into_iter().map(|(dat, kind)| (
+            unsafe { LocatedSpan::new_from_raw_offset(dat.location_offset(), dat.location_line(), dat.into_fragment(), ()) },
+            kind
+        )).collect() }
+}
+
+pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, ParseTranslationUnit> {
     terminated(
         fold_many0(delimited(multispace0, parse_item, multispace0), TranslationUnit::default, assign_item),
         context("expected top level item", pair(multispace0, eof)) // this is there to allow empty files
@@ -24,7 +34,7 @@ fn assign_item<'a>(mut dest: ParseTranslationUnit, item: Item) -> ParseTranslati
     dest
 }
 
-pub(crate) fn parse_item(dat: ParseInput) ->  ParseResult<Item> {
+pub(crate) fn parse_item<'a, 'b>(dat: ParseInput<'a, 'b>) ->  ParseResult<'a, 'b, Item> {
     alt((
         parse_comment,
         preceded(tag("use"),  cut(parse_use)),
@@ -33,21 +43,21 @@ pub(crate) fn parse_item(dat: ParseInput) ->  ParseResult<Item> {
     ))(dat)
 }
 
-pub(crate) fn parse_comment(dat: ParseInput) -> ParseResult<Item> {
+pub(crate) fn parse_comment<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Item> {
     alt((
         value(Item::Comment, pair(tag("//"), take_until("\n"))),
         value(Item::Comment, delimited(tag("/*"), take_until("*/"), tag("*/"))),
     ))(dat)
 }
 
-pub(crate) fn parse_use(dat: ParseInput) -> ParseResult<Item> {
+pub(crate) fn parse_use<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Item> {
     map(
         tuple((multispace0, cut(parse_str_basic))),
         |(_, path)| Item::Use(Use { path })
     )(dat)
 }
 
-pub(crate) fn parse_fun_def(dat: ParseInput) -> ParseResult<Item> {
+pub(crate) fn parse_fun_def<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Item> {
     map(
         tuple((
             preceded(multispace0, parse_ident),
@@ -58,7 +68,7 @@ pub(crate) fn parse_fun_def(dat: ParseInput) -> ParseResult<Item> {
     )(dat)
 }
 
-pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
+pub(crate) fn parse_type_def<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Item> {
     map(
         tuple((
             preceded(multispace0, cut(parse_ident)),
@@ -68,7 +78,7 @@ pub(crate) fn parse_type_def(dat: ParseInput) -> ParseResult<Item> {
     )(dat)
 }
 
-pub(crate) fn parse_partial_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
+pub(crate) fn parse_partial_signature<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
     context("expected partial signature", delimited(
         char('('),
         cut(many0(delimited(multispace0, parse_op, multispace0))),
@@ -76,7 +86,7 @@ pub(crate) fn parse_partial_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
     ))(dat)
 }
 
-pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
+pub(crate) fn parse_signature<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
     context("expected signature", delimited(
         char('('),
         cut(alt((
@@ -87,7 +97,7 @@ pub(crate) fn parse_signature(dat: ParseInput) -> ParseResult<Vec<Op>> {
     ))(dat)
 }
 
-pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
+pub(crate) fn parse_block<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Block> {
     delimited(
         context("expected block", char('{')),
         delimited(multispace0, many0(delimited(multispace0, parse_op, multispace0)), multispace0),
@@ -95,7 +105,7 @@ pub(crate) fn parse_block(dat: ParseInput) -> ParseResult<Block> {
     )(dat)
 }
 
-pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
+pub(crate) fn parse_op<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Op> {
     map(
         alt((
             alt((
@@ -160,7 +170,7 @@ pub(crate) fn parse_op(dat: ParseInput) -> ParseResult<Op> {
     )(dat)
 }
 
-pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<usize> {
+pub(crate) fn parse_integer<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, usize> {
 
     use nom::{Err as NomErr, error::ErrorKind};
 
@@ -188,7 +198,7 @@ pub(crate) fn parse_integer(dat: ParseInput) -> ParseResult<usize> {
     result
 }
 
-pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<IdentStr> {
+pub(crate) fn parse_ident<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, IdentStr> {
     map(
         context("identifier cannot be a keyword", verify(
             context("expected identifier", recognize(pair(alpha1, many0(alt((alphanumeric1, tag("-"))))))),
@@ -198,7 +208,7 @@ pub(crate) fn parse_ident(dat: ParseInput) -> ParseResult<IdentStr> {
     )(dat)
 }
 
-pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<IdentStr> {
+pub(crate) fn parse_str_basic<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, IdentStr> {
     context("expected string literal", map(
         delimited(char('\"'), is_not("\""), char('\"')),
         to_identstr
@@ -206,7 +216,7 @@ pub(crate) fn parse_str_basic(dat: ParseInput) -> ParseResult<IdentStr> {
     )(dat)
 }
 
-pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
+pub(crate) fn parse_str_escaped<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, String> {
     context("expected string literal", delimited(
         char('\"'),
         cut(context("invalid escape sequence", escaped_transform(
@@ -222,7 +232,7 @@ pub(crate) fn parse_str_escaped(dat: ParseInput) -> ParseResult<String> {
     ))(dat)
 }
 
-pub(crate) fn parse_tuple_literal(dat: ParseInput) -> ParseResult<Vec<Op>> {
+pub(crate) fn parse_tuple_literal<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
     delimited(
         char('('),
         many0(delimited(multispace0, parse_op, multispace0)),
@@ -230,27 +240,28 @@ pub(crate) fn parse_tuple_literal(dat: ParseInput) -> ParseResult<Vec<Op>> {
     )(dat)
 }
 
-pub(crate) type ParseResult<'a, O> = IResult<ParseInput<'a>, O, ParseError<'a>>;
-pub(crate) type ParseInput<'a> = LocatedSpan<&'a str, &'a arena::StrArena>;
-pub(crate) type ParseError<'a> = VerboseError<ParseInput<'a>>;
+pub(crate) type ParseResult<'a, 'b, O> = IResult<ParseInput<'a, 'b>, O, ParseError<'a, 'b>>;
+pub(crate) type ParseInput<'a, 'b> = LocatedSpan<&'a str, &'b arena::StrArena>;
+pub(crate) type ParseError<'a, 'b> = VerboseError<ParseInput<'a, 'b>>;
+pub(crate) type FinalParseError<'a> = VerboseError<LocatedSpan<&'a str>>;
 
-pub(crate) fn format_error(value: ParseError) -> diagnostic::Diagnostic {
+pub(crate) fn format_error(value: FinalParseError) -> diagnostic::Diagnostic {
 
     let mut diag = diagnostic::Diagnostic::error("invalid source file");
 
-    if let Some((span, _)) = value.errors.first() {
-        let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
-        let (before, highlight, after) = split_at_char_index(code, span.get_utf8_column() - 1);
-        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
-        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column(), offset: span.location_offset() });
-    }
-
-    for (_, kind) in value.errors.iter() {
-        if let VerboseErrorKind::Context(message) = kind {
-            diag.notes.push(message.to_string());
-            break
-        }
-    }
+//    if let Some((span, _)) = value.errors.first() {
+//        let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
+//        let (before, highlight, after) = split_at_char_index(code, span.get_utf8_column() - 1);
+//        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
+//        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column(), offset: span.location_offset() });
+//    }
+//
+//    for (_, kind) in value.errors.iter() {
+//        if let VerboseErrorKind::Context(message) = kind {
+//            diag.notes.push(message.to_string());
+//            break
+//        }
+//    }
 
     diag
 
@@ -279,6 +290,7 @@ pub(crate) struct TranslationUnit<U> { // todo: dont use generics here :/
     pub uses: U,
     pub funs: Vec<FunDef>,
     pub types: Vec<TypeDef>,
+    pub arena: arena::StrArena,
 }
 
 pub(crate) type ParseTranslationUnit = TranslationUnit<Vec<Use>>;

@@ -55,9 +55,7 @@ fn main() {
 
     let input_file_name = opts.input.file_name().expect("invalid input file path").to_string_lossy();
 
-    let mut arena = arena::StrArena::default();
-
-    let source = match parser::parse(&data, &mut arena) {
+    let source = match parser::parse(&data) {
         Ok(val) => val,
         Err(err) => {
             parser::format_error(err)
@@ -75,7 +73,7 @@ fn main() {
 
     // we now need to genrate code for the source files
 
-    let mut symbols = match basegen::basegen::<arch::Intel64>(&arena, source.funs) { // todo: add debug timings for codegen
+    let symbols = match basegen::basegen::<arch::Intel64>(source) { // todo: add debug timings for codegen
         Ok(val) => val,
         Err(err) => {
             if opts.debug() {
@@ -162,8 +160,8 @@ pub(crate) mod arch {
 }
 
 fn debug_print_program<I: fmt::Debug>(program: &Program<I>) {
-    for (name, fun) in program.funs.iter() {
-        eprintln!("fn {}:", program.arena.get(*name));
+    for (_name, fun) in program.funs.iter() {
+        // eprintln!("fn {}:", program.arena.get(*name));
         for (idx, instruction) in fun.body.iter().enumerate() {
             eprintln!("{:3}: {:?}", idx, instruction);
         }
