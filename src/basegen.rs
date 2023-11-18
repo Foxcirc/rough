@@ -1,24 +1,33 @@
 
 
 use std::{fmt, collections::HashMap, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, TranslationUnit}, diagnostic::Diagnostic, arch::Intrinsic, arena};
+use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, TranslationUnit, ParsedItems}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
-pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit) -> Result<Symbols<I>, CodegenError> {
+pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Result<TranslationUnit<BaseProgram<I>>, CodegenError> {
 
-    let mut part = Symbols::default();
+    let mut part = TranslationUnit {
+        inner: BaseProgram::default(),
+        arena: source.arena
+    };
 
-    for item in source.funs.into_iter() {
+    for item in source.inner.funs.into_iter() {
 
-        let mut state = State::<I>::with_arena(&source.arena);
-        codegen_block(&mut state, item.body, None)?;
-        state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
+        // generate bytecode for the signature
+        let mut signature_state = State::<I>::with_arena(&part.arena);
+        codegen_block(&mut signature_state, item.signature, None)?;
+        signature_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
+
+        // generate bytecode for the body
+        let mut body_state = State::<I>::with_arena(&part.arena);
+        codegen_block(&mut body_state, item.body, None)?;
+        body_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
 
         let fun = FunWithMetadata {
-            signature: item.signature,
-            body: state.bytecode,
+            signature: signature_state.bytecode,
+            body: body_state.bytecode,
         };
 
-        part.funs.insert(item.name, fun);
+        part.inner.funs.insert(item.name, fun);
     
     }
 
@@ -33,6 +42,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
         match op.kind {
 
             OpKind::Nop => (),
+            OpKind::Push { value: Literal::Tuple(_tuple) } => todo!(),
             OpKind::Push { value } => state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
 
             OpKind::Call { name }  => {
@@ -145,9 +155,6 @@ impl<I> Instr<I> {
     pub(crate) fn spanned(kind: InstrKind<I>, span: Span) -> Self {
         Self { kind, span }
     }
-    pub(crate) fn unspanned(kind: InstrKind<I>) -> Self {
-        Self { kind, span: Span::default() }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -232,13 +239,13 @@ impl<'a, I> State<'a, I> {
     }
 }
 
-pub(crate) struct Symbols<I> {
+pub(crate) struct BaseProgram<I> {
     pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
 
 // cannot derive Default because of the generics
-impl<I> Default for Symbols<I> {
+impl<I> Default for BaseProgram<I> {
     fn default() -> Self {
         Self {
             funs: HashMap::new(),
@@ -264,8 +271,8 @@ fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer:
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct FunWithMetadata<I> {
-    pub signature: Vec<Op>,
+pub(crate) struct FunWithMetadata<I> { // todo: rename to basegenFun
+    pub signature: Bytecode<I>,
     pub body: Bytecode<I>,
 }
 
@@ -289,14 +296,12 @@ impl CodegenError {
 pub(crate) enum CodegenErrorKind {
     InvalidElse,
     InvalidBreak,
-    InvalidSignature,
 }
 
 pub(crate) fn format_error(value: CodegenError) -> Diagnostic {
     let diag = match &value.kind {
         CodegenErrorKind::InvalidElse => Diagnostic::error("`else` block withput `if` block"),
         CodegenErrorKind::InvalidBreak => Diagnostic::error("`break` outside loop"),
-        CodegenErrorKind::InvalidSignature => Diagnostic::error("invalid type in fn signature"),
     };
     diag.pos(value.span.to_pos())
 }

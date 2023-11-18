@@ -1,12 +1,16 @@
 
-use fancy::colorize;
-
 #[derive(Clone)]
 pub(crate) enum Level {
     Debug,
     Info,
     Warning,
     Error,
+}
+
+impl Level {
+    pub fn is_light(&self) -> bool {
+        matches!(self, Self::Debug | Self::Info)
+    }
 }
 
 #[derive(Clone)]
@@ -81,32 +85,50 @@ impl Diagnostic {
 
         let mut output = String::with_capacity(
             self.message.len() +
-            self.code.clone().map(|s| s.len()).unwrap_or(0) +
+            self.code.as_ref().map(|s| s.len()).unwrap_or(0) +
             self.notes.iter().map(|s| s.len()).sum::<usize>()
         );
 
         match self.level {
-            Level::Debug   => output.push_str(&colorize!("[def]debug: {}\n", self.message)),
-            Level::Info    => output.push_str(&colorize!("[blue]info: {}\n", self.message)),
-            Level::Warning => output.push_str(&colorize!("[yellow]warning: {}\n", self.message)),
-            Level::Error   => output.push_str(&colorize!("[red]error: {}\n", self.message)),
+            Level::Debug   => output.push_str("\x1b[34mdebug: "),
+            Level::Info    => output.push_str("\x1b[34minfo: \x1b[0m"),
+            Level::Warning => output.push_str("\x1b[33mwarn: \x1b[0m"),
+            Level::Error   => output.push_str("\x1b[31merror: \x1b[0m"),
+        }
+
+        output.push_str(&self.message);
+
+        // if debug or info add notes into the same line
+        if self.level.is_light() {
+            for note in self.notes.iter() {
+                output.push_str(", ");
+                output.push_str(note);
+            }
         }
 
         match (&self.file, &self.pos) {
-            (Some(path), Some(pos)) => output.push_str(&colorize!("[def]    in {}:{}:{} at offset {}\n", path, pos.line, pos.column, pos.offset)),
-            (Some(path), None     ) => output.push_str(&colorize!("[def]    in file {}\n", path)),
-            (None,       Some(pos)) => output.push_str(&colorize!("[def]    at position {}:{} at offset {}\n", pos.line, pos.column, pos.offset)),
+            (Some(path), Some(pos)) => output.push_str(&format!("\n    in {}:{}:{} at offset {}", path, pos.line, pos.column, pos.offset)),
+            (Some(path), None     ) => output.push_str(&format!("\n    in file {}", path)),
+            (None,       Some(pos)) => output.push_str(&format!("\n    at position {}:{} at offset {}", pos.line, pos.column, pos.offset)),
             (..) => (),
         }
 
         if let Some(code) = &self.code {
-            output.push_str(&colorize!("[def]    at `{}`\n", code));
+            output.push_str(&format!("\n    at `{}`", code));
         }
 
-        for note in self.notes.clone() {
-            output.push_str(&colorize!("[def]  note: {}\n", note));
+        // if not debug, add notes here
+        if !self.level.is_light() {
+            for note in self.notes.iter() {
+                output.push_str("\n");
+                output.push_str("  ");
+                output.push_str(note);
+            }
         }
 
+        output.push_str("\n");
+        output.push_str("\x1b[0m"); // reset color style
+        
         output
 
     }

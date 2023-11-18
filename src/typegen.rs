@@ -1,11 +1,11 @@
 
-use crate::{basegen::{FileSpan, Symbols, Program}, parser::Span, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{basegen::{FileSpan, BaseProgram, Program}, parser::{Span, TranslationUnit}, arch::Intrinsic, diagnostic::Diagnostic};
 
-pub(crate) fn typecheck<I: Intrinsic>(program: Symbols<I>) -> Result<Program<I>, TypeError> {
+pub(crate) fn typecheck<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
-    Ok(Program {
-        funs: Default::default(),
-        types: Default::default(),
+    Ok(TranslationUnit {
+        inner: Program { funs: Default::default(), types: Default::default() },
+        arena: base_program.arena,
     })
 
 }

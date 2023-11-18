@@ -4,7 +4,7 @@ use nom_locate::LocatedSpan;
 use std::cell::RefCell;
 use crate::{diagnostic, arena};
 
-pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit, FinalParseError<'d>> {
+pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, FinalParseError<'d>> {
     let arena = RefCell::new(arena::StrArena::default());
     parse_items(LocatedSpan::new_extra(dat, &arena)).finish()
         .map_err(|err| ignore_extra(err))
@@ -22,19 +22,19 @@ fn ignore_extra<'a, 'b>(val: ParseError<'a, 'b>) -> FinalParseError<'a> {
         )).collect() }
 }
 
-pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, TranslationUnit> {
+pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, TranslationUnit<ParsedItems>> {
     terminated(
         fold_many0(delimited(multispace0, parse_item, multispace0), TranslationUnit::default, assign_item),
         context("expected top level item", pair(multispace0, eof)) // this is there to allow empty files
     )(dat)
 }
 
-fn assign_item<'a>(mut dest: TranslationUnit, item: Item) -> TranslationUnit {
+fn assign_item<'a>(mut dest: TranslationUnit<ParsedItems>, item: Item) -> TranslationUnit<ParsedItems> {
     match item {
         Item::Comment      => (),
-        Item::Use(val)     => dest.uses.push(val),
-        Item::FunDef(val)  => dest.funs.push(val),
-        Item::TypeDef(val) => dest.types.push(val),
+        Item::Use(val)     => dest.inner.uses.push(val),
+        Item::FunDef(val)  => dest.inner.funs.push(val),
+        Item::TypeDef(val) => dest.inner.types.push(val),
     }
     dest
 }
@@ -66,7 +66,7 @@ pub(crate) fn parse_fun_def<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 
     map(
         tuple((
             preceded(multispace0, parse_ident),
-            preceded(multispace0, opt(parse_signature)),
+            preceded(multispace0, opt(parse_tuple_literal)),
             preceded(multispace0, parse_block),
         )),
         |(name, signature, block)| Item::FunDef(FunDef { name, signature: signature.unwrap_or_default(), body: block, span: Span::from_located_span(&dat) })
@@ -77,32 +77,13 @@ pub(crate) fn parse_type_def<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a,
     map(
         tuple((
             preceded(multispace0, cut(parse_ident)),
-            preceded(multispace0, cut(parse_partial_signature)),
+            preceded(multispace0, cut(parse_tuple_literal)),
         )),
         |(name, inner)| Item::TypeDef(TypeDef { name, signature: inner, span: Span::from_located_span(&dat) })
     )(dat)
 }
 
-pub(crate) fn parse_partial_signature<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
-    context("expected partial signature", delimited(
-        char('('),
-        cut(many0(delimited(multispace0, parse_op, multispace0))),
-        char(')')
-    ))(dat)
-}
-
-pub(crate) fn parse_signature<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
-    context("expected signature", delimited(
-        char('('),
-        cut(alt((
-            value(Vec::new(), tag("variadic")),
-            many0(delimited(multispace0, parse_op, multispace0))
-        ))),
-        char(')')
-    ))(dat)
-}
-
-pub(crate) fn parse_block<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Block> {
+pub(crate) fn parse_block<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
     delimited(
         context("expected block", char('{')),
         delimited(multispace0, many0(delimited(multispace0, parse_op, multispace0)), multispace0),
@@ -240,7 +221,8 @@ pub(crate) fn parse_str_escaped<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<
 pub(crate) fn parse_tuple_literal<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Vec<Op>> {
     delimited(
         char('('),
-        many0(delimited(multispace0, parse_op, multispace0)),
+        cut(context("expected tuple literal",
+            many0(delimited(multispace0, parse_op, multispace0)))),
         char(')')
     )(dat)
 }
@@ -291,14 +273,17 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct TranslationUnit {
-    pub uses: Vec<Use>,
-    pub funs: Vec<FunDef>,
-    pub types: Vec<TypeDef>,
+pub(crate) struct TranslationUnit<T> {
+    pub inner: T,
     pub arena: arena::StrArena,
 }
 
-pub(crate) type Block = Vec<Op>;
+#[derive(Debug, Default)]
+pub(crate) struct ParsedItems {
+    pub uses: Vec<Use>,
+    pub funs: Vec<FunDef>,
+    pub types: Vec<TypeDef>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Item {
@@ -318,14 +303,14 @@ pub(crate) struct FunDef {
     pub name: IdentStr,
     pub span: Span,
     pub signature: Vec<Op>,
-    pub body: Block,
+    pub body: Vec<Op>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TypeDef {
     pub name: IdentStr,
     pub span: Span,
-    pub signature: Vec<Op>, // todo: ByteCode?
+    pub signature: Vec<Op>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -402,12 +387,12 @@ pub(crate) enum OpKind {
     Lt,
     Lte,
 
-    If   { block: Block },
-    Elif { block: Block },
-    Else { block: Block },
+    If   { block: Vec<Op> },
+    Elif { block: Vec<Op> },
+    Else { block: Vec<Op> },
 
-    Loop { block: Block },
-    For  { block: Block },
+    Loop { block: Vec<Op> },
+    For  { block: Vec<Op> },
     Break,
 
 }

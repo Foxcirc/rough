@@ -10,11 +10,12 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, fmt, fs, path, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time, collections::HashMap, pin::Pin, mem, task::Poll, future::Future, iter, ffi::OsString};
+use std::{env, fmt, fs, path, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time, collections::HashMap, ffi::OsString};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
-use futures_lite::{future::{self, poll_fn}, FutureExt};
+use futures_lite::{future, FutureExt};
+use parser::TranslationUnit;
 
 fn main() {
     
@@ -22,7 +23,7 @@ fn main() {
         Err(err) => {
             let diag = match err {
                 cli::CliError::Expected(what) => Diagnostic::error(format!("expected {}", what)),
-                cli::CliError::Invalid(what, got) => Diagnostic::error(format!("expected {} but got {}", what, got)),
+                cli::CliError::Invalid(what, got) => Diagnostic::error(format!("invalid {}", what)).code(got),
                 cli::CliError::UnknownFlag(other) => Diagnostic::error("invalid flag").note(&other),
             };
             diag.emit();
@@ -126,7 +127,7 @@ fn main() {
     match unique.opts.mode {
         cli::Mode::ShowIr => {
             Diagnostic::info("showing intermediate representation").emit();
-            debug_print_program(&program);
+            debug_print_program(&program.inner);
         },
         cli::Mode::Build => {
             Diagnostic::info("starting build").emit();
@@ -134,7 +135,7 @@ fn main() {
         },
         cli::Mode::Run => {
             Diagnostic::info("starting evaluation").emit();
-            match eval::eval(program) {
+            match eval::eval(program.inner) {
                 Ok(()) => (),
                 Err(err) => {
                     eval::format_error(err).emit();
@@ -146,7 +147,7 @@ fn main() {
 
 }
 
-fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static, I>>, path: path::PathBuf) -> future::Boxed<Result<Arc<Program<I>>, ()>> {
+fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static, I>>, path: path::PathBuf) -> future::Boxed<Result<Arc<TranslationUnit<Program<I>>>, ()>> {
 
     async move {
 
@@ -234,7 +235,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
         let mut futs = Vec::new();
 
-        for module in source.uses.iter() {
+        for module in source.inner.uses.iter() {
 
             let module_path = path.with_file_name("").join(source.arena.get(module.path));
 
@@ -255,7 +256,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
         // we now can genrate code for this translation unit
 
-        let symbols = match basegen::basegen(source) {
+        let base_program = match basegen::basegen(source) {
             Ok(val) => val,
             Err(err) => {
                 if shared.opts.debug() {
@@ -268,7 +269,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             }
         };
 
-        let program = match typegen::typecheck(symbols) {
+        let program = match typegen::typecheck(base_program) {
             Ok(val) => val,
             Err(err) => {
                 if shared.opts.debug() {
@@ -311,7 +312,7 @@ struct SharedState<'a, I: Send + Sync> {
 
 enum CompilationState<I> {
     InProgress(Arc<WaitState>), // inside an Arc, so we can access it without always holding the lock
-    Done(Arc<Program<I>>) // inside an Arc, so we can access it without always holding the lock
+    Done(Arc<TranslationUnit<Program<I>>>) // inside an Arc, so we can access it without always holding the lock
 }
 
 struct WaitState {
