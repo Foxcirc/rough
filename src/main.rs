@@ -238,9 +238,9 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
             let module_path = path.with_file_name("").join(source.arena.get(module.path));
 
-            // compile the module (or automatically get it from the cache)
-            let val = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path.clone()));
-            futs.push(val);
+            // compile the module (caching handeled inside compile)
+            let fut = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path.clone()));
+            futs.push(fut);
 
         }
 
@@ -306,12 +306,12 @@ fn split_path_unwrap(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
 struct SharedState<'a, I: Send + Sync> {
     pub opts: cli::Opts,
     pub executor: async_executor::Executor<'a>,
-    pub cache: async_lock::RwLock<HashMap<path::PathBuf, CompilationState<Arc<Program<I>>>>>,
+    pub cache: async_lock::RwLock<HashMap<path::PathBuf, CompilationState<I>>>,
 }
 
-enum CompilationState<T> {
-    InProgress(Arc<WaitState>),
-    Done(T)
+enum CompilationState<I> {
+    InProgress(Arc<WaitState>), // inside an Arc, so we can access it without always holding the lock
+    Done(Arc<Program<I>>) // inside an Arc, so we can access it without always holding the lock
 }
 
 struct WaitState {
