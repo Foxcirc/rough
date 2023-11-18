@@ -86,7 +86,7 @@ impl Diagnostic {
         );
 
         match self.level {
-            Level::Debug   => output.push_str(&colorize!("[blue]debug: {}\n", self.message)),
+            Level::Debug   => output.push_str(&colorize!("[def]debug: {}\n", self.message)),
             Level::Info    => output.push_str(&colorize!("[blue]info: {}\n", self.message)),
             Level::Warning => output.push_str(&colorize!("[yellow]warning: {}\n", self.message)),
             Level::Error   => output.push_str(&colorize!("[red]error: {}\n", self.message)),

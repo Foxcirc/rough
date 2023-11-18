@@ -4,16 +4,17 @@ pub(crate) mod test;
 
 pub mod diagnostic;
 pub mod arena;
+pub mod util;
 pub mod parser;
 pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, fmt, fs, path, sync::Arc, thread, time};
+use std::{env, fmt, fs, path, sync::Arc, thread, time, collections::HashMap, pin::Pin, mem, task::Poll, future::Future, iter};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
-use futures_lite::{future, FutureExt};
+use futures_lite::{future::{self, poll_fn}, FutureExt};
 
 fn main() {
     
@@ -43,23 +44,25 @@ fn main() {
         return
     }
 
-    let executor = async_executor::Executor::new();
-
     let input_path = opts.input.clone();
-    let shared = Arc::new(SharedState { opts, executor });
+    let unique = Arc::new(SharedState {
+        opts,
+        executor: async_executor::Executor::new(),
+        cache: async_lock::RwLock::new(HashMap::new()),
+    });
 
     // asynchronously compile the program
 
     let max_threads = num_cpus::get();
-    let num_threads = shared.opts.threads.as_ref().copied().unwrap_or(max_threads).clamp(1, max_threads);
+    let num_threads = unique.opts.threads.as_ref().copied().unwrap_or(max_threads).clamp(1, max_threads);
 
     // used to determine if the compilation of the main module is done
     let barrier = Arc::new(async_lock::Barrier::new(num_threads + 1));
 
     // spawn the task that compiles the main program
-    let shared_clone = Arc::clone(&shared);
+    let shared_clone = Arc::clone(&unique);
     let barrier_clone = Arc::clone(&barrier);
-    let task = shared.executor.spawn(async move {
+    let task = unique.executor.spawn(async move {
         let result = compile::<Intel64>(shared_clone, input_path).await;
         barrier_clone.wait().await; // signal to the workers that they can exit now
         result
@@ -73,7 +76,7 @@ fn main() {
     // spawn the worker threads
     let mut handles = Vec::new();
     for _ in 0..num_threads { // spawn num_threads threads
-        let shared_clone = Arc::clone(&shared);
+        let shared_clone = Arc::clone(&unique);
         let barrier_clone = Arc::clone(&barrier);
         let handle = thread::spawn(move || {
             future::block_on(shared_clone.executor.run(barrier_clone.wait()));
@@ -100,17 +103,23 @@ fn main() {
     // get the result of the task which compiled the main module
     // note: this will potentially still need to run the `barrier.wait().await` inside the main task
     // if all worker threads exited as soon as the barrier became free
-    let program = match future::block_on(shared.executor.run(task)) {
+    let result = match future::block_on(unique.executor.run(task)) {
         Ok(val) => val,
         Err(()) => return,
     };
 
     // all tasks must have completed by now
-    assert!(shared.executor.is_empty());
+    assert!(unique.executor.is_empty());
+
+    // destroy the shared state
+    let mut unique = Arc::into_inner(unique).expect("state must be unique by now");
+    unique.cache.get_mut().clear(); // clear the cache so we can take the program out of the arc
+
+    let program = Arc::into_inner(result).expect("result must be unique by now");
 
     // now we can either evaluate the program or generate something else
 
-    match shared.opts.mode {
+    match unique.opts.mode {
         cli::Mode::ShowIr => {
             Diagnostic::info("showing intermediate representation").emit();
             debug_print_program(&program);
@@ -133,11 +142,20 @@ fn main() {
 
 }
 
-fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, path: path::PathBuf) -> future::Boxed<Result<Program<I>, ()>> {
+fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static, I>>, path: path::PathBuf) -> future::Boxed<Result<Arc<Program<I>>, ()>> {
 
     async move {
 
         let module_name = path.to_string_lossy().to_string();
+
+        let guard = shared.cache.read().await;
+        if let Some(val) = guard.get(&path) {
+            if shared.opts.debug() {
+                Diagnostic::debug(format!("cached module `{}`", module_name)).emit();
+            }
+            return Ok(Arc::clone(&val))
+        }
+        drop(guard);
 
         if shared.opts.debug() {
             Diagnostic::debug(format!("compiling module `{}`", module_name)).emit();
@@ -163,17 +181,26 @@ fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, pat
             }
         };
 
-        let mut deps = Vec::new();
+        let mut futs = Vec::new();
 
         for module in source.uses.iter() {
 
             let module_path = path.with_file_name("").join(source.arena.get(module.path));
-            let program = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path)).await;
-            deps.push(program);
+
+            let val = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path.clone()));
+            futs.push(val);
 
         }
 
-        // we now need to genrate code for the source files
+        // todo: keep track of building modules and wait for the module to be build if it's already building inside another worker
+
+        // wait for all the dependencies to be built
+        let _deps = util::join_all(futs).await;
+
+        // we now can genrate code for this translation unit
+
+        println!("sleep");
+        thread::sleep(time::Duration::from_millis(100));
 
         let symbols = match basegen::basegen(source) { // todo: add debug timings for codegen
             Ok(val) => val,
@@ -199,15 +226,23 @@ fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, pat
             }
         };
 
-        Ok(program)
+        let arc = Arc::new(program);
+
+        // write the built module into the cache
+        let mut guard = shared.cache.write().await;
+        guard.insert(path, Arc::clone(&arc));
+        drop(guard);
+
+        Ok(arc)
 
     }.boxed()
 
 }
 
-struct SharedState<'a> {
+struct SharedState<'a, I: Send + Sync> {
     pub opts: cli::Opts,
     pub executor: async_executor::Executor<'a>,
+    pub cache: async_lock::RwLock<HashMap<path::PathBuf, Arc<Program<I>>>>,
 }
 
 pub(crate) mod arch {
