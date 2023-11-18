@@ -178,9 +178,13 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
                 }
 
             } else {
+
+                drop(guard);
+
                 if shared.opts.debug() {
                     Diagnostic::debug(format!("already compiled module `{}`", module_name)).emit();
                 }
+
             }
 
             // compilation of the module must be done now
@@ -241,14 +245,17 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
         }
 
         // wait for all the dependencies to be built
-        let _deps = util::join_all(futs).await;
+        let results = util::join_all(futs).await;
+        let mut deps = Vec::with_capacity(results.len());
+        for result in results {
+            deps.push(result?);
+        }
+
+        drop(deps); // <- do something with the dependencies
 
         // we now can genrate code for this translation unit
 
-        println!("sleep");
-        thread::sleep(time::Duration::from_millis(100));
-
-        let symbols = match basegen::basegen(source) { // todo: add debug timings for codegen
+        let symbols = match basegen::basegen(source) {
             Ok(val) => val,
             Err(err) => {
                 if shared.opts.debug() {
@@ -271,8 +278,8 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
                 return Err(())
             }
         };
-
-        let arc = Arc::new(program);
+        
+        let result = Arc::new(program);
 
         // store the compiled module inside the cache
         let mut guard = shared.cache.write().await;
@@ -283,10 +290,10 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
         } else {
             unreachable!()
         }
-        *entry = CompilationState::Done(Arc::clone(&arc));
+        *entry = CompilationState::Done(Arc::clone(&result));
         drop(guard);
 
-        Ok(arc)
+        Ok(result)
 
     }.boxed()
 
