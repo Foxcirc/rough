@@ -10,7 +10,7 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, fmt, fs, path, sync::Arc, thread, time, collections::HashMap, pin::Pin, mem, task::Poll, future::Future, iter};
+use std::{env, fmt, fs, path, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time, collections::HashMap, pin::Pin, mem, task::Poll, future::Future, iter, ffi::OsString};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
@@ -39,12 +39,16 @@ fn main() {
         Ok(opts) => opts,
     };
 
-    if opts.input.file_name().is_none() {
-        Diagnostic::error("no input file provided").emit();
-        return
-    }
+    let (working_dir, input_file) = match split_path_unwrap(opts.input.clone()) {
+        Some(val) => val,
+        None => {
+            Diagnostic::error("invalid (or no) input file provided").emit();
+            return
+        }
+    };
 
-    let input_path = opts.input.clone();
+    env::set_current_dir(working_dir).expect("cannot set working directory");
+
     let unique = Arc::new(SharedState {
         opts,
         executor: async_executor::Executor::new(),
@@ -63,7 +67,7 @@ fn main() {
     let shared_clone = Arc::clone(&unique);
     let barrier_clone = Arc::clone(&barrier);
     let task = unique.executor.spawn(async move {
-        let result = compile::<Intel64>(shared_clone, input_path).await;
+        let result = compile::<Intel64>(shared_clone, path::PathBuf::from(input_file)).await;
         barrier_clone.wait().await; // signal to the workers that they can exit now
         result
     });
@@ -148,13 +152,56 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
         let module_name = path.to_string_lossy().to_string();
 
+        // check if we already compiled this module or are compiling it right now
         let guard = shared.cache.read().await;
         if let Some(val) = guard.get(&path) {
-            if shared.opts.debug() {
-                Diagnostic::debug(format!("cached module `{}`", module_name)).emit();
+
+            // possibly already compiling in another task
+            if let CompilationState::InProgress(waitstate) = val {
+
+                if shared.opts.debug() {
+                    Diagnostic::debug(format!("waiting for module `{}`", module_name)).emit();
+                }
+
+                let cloned = Arc::clone(&waitstate);
+                let listener = event_listener::EventListener::new(&cloned.event);
+
+                drop(guard);
+
+                futures_lite::pin!(listener);
+
+                // wait for the compilation to finish
+                loop {
+                    if cloned.flag.load(Ordering::Acquire) { break }
+                    if listener.as_mut().is_listening() { listener.as_mut().await }
+                    else { listener.as_mut().listen() }
+                }
+
+            } else {
+                if shared.opts.debug() {
+                    Diagnostic::debug(format!("already compiled module `{}`", module_name)).emit();
+                }
             }
-            return Ok(Arc::clone(&val))
+
+            // compilation of the module must be done now
+            let guard = shared.cache.read().await;
+            if let Some(val) = guard.get(&path) {
+                if let CompilationState::Done(program) = val {
+                    return Ok(Arc::clone(program))
+                } else {
+                    unreachable!()
+                }
+            } else {
+                unreachable!()
+            }
+
         }
+        drop(guard);
+
+        // tell other tasks that this module is being worked on already
+        let waitstate = WaitState { event: event_listener::Event::new(), flag: AtomicBool::new(false) };
+        let mut guard = shared.cache.write().await;
+        guard.insert(path.clone(), CompilationState::InProgress(Arc::new(waitstate)));
         drop(guard);
 
         if shared.opts.debug() {
@@ -187,12 +234,11 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
             let module_path = path.with_file_name("").join(source.arena.get(module.path));
 
+            // compile the module (or automatically get it from the cache)
             let val = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path.clone()));
             futs.push(val);
 
         }
-
-        // todo: keep track of building modules and wait for the module to be build if it's already building inside another worker
 
         // wait for all the dependencies to be built
         let _deps = util::join_all(futs).await;
@@ -228,9 +274,16 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
         let arc = Arc::new(program);
 
-        // write the built module into the cache
+        // store the compiled module inside the cache
         let mut guard = shared.cache.write().await;
-        guard.insert(path, Arc::clone(&arc));
+        let entry = guard.get_mut(&path).expect("module must be present");
+        if let CompilationState::InProgress(waitstate) = entry {
+            waitstate.flag.store(true, Ordering::SeqCst); // todo: what ordering to use here
+            waitstate.event.notify(usize::MAX); // todo: use notify_relaxed here?
+        } else {
+            unreachable!()
+        }
+        *entry = CompilationState::Done(Arc::clone(&arc));
         drop(guard);
 
         Ok(arc)
@@ -239,10 +292,24 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
 }
 
+fn split_path_unwrap(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
+    Some((path.parent()?.to_path_buf(), path.file_name()?.to_os_string()))
+}
+
 struct SharedState<'a, I: Send + Sync> {
     pub opts: cli::Opts,
     pub executor: async_executor::Executor<'a>,
-    pub cache: async_lock::RwLock<HashMap<path::PathBuf, Arc<Program<I>>>>,
+    pub cache: async_lock::RwLock<HashMap<path::PathBuf, CompilationState<Arc<Program<I>>>>>,
+}
+
+enum CompilationState<T> {
+    InProgress(Arc<WaitState>),
+    Done(T)
+}
+
+struct WaitState {
+    pub event: event_listener::Event,
+    pub flag: AtomicBool
 }
 
 pub(crate) mod arch {

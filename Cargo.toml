@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 async-executor = "1.6.0"
 async-lock = "3.1.0"
+event-listener = "3.1.0"
 fancy = "0.3.1"
 futures-lite = "2.0.1"
 nom = "7.1.3"
