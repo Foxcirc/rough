@@ -9,11 +9,11 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, fmt, fs, path, sync::Arc};
+use std::{env, fmt, fs, path, sync::Arc, thread};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
-use futures_lite::future;
+use futures_lite::{future, FutureExt};
 
 fn main() {
     
@@ -49,14 +49,25 @@ fn main() {
 
     // asynchronously compile the input file
 
-    let receiver = compile::<Intel64>(Arc::clone(&shared), path);
+    let task = shared.executor.spawn(compile::<Intel64>(Arc::clone(&shared), path));
 
-    let program = future::block_on(async {
-        while !shared.executor.is_empty() {
-            shared.executor.tick().await; // potential to add multithreading here
-        }
-        receiver.recv().await.unwrap()
+    let shared_clone = Arc::clone(&shared);
+    let handle = thread::spawn(move || {
+        future::block_on(shared_clone.executor.run(future::pending()))
     });
+
+    match handle.join() {
+        Ok(()) => (),
+        Err(_err) => {
+            Diagnostic::error("worker thread panicked").emit();
+            return
+        }
+    };
+
+    let program = match future::block_on(task) {
+        Ok(val) => val,
+        Err(()) => return,
+    };
 
     if matches!(shared.opts.mode, cli::Mode::ShowIr) {
         Diagnostic::debug("showing intermediate representation").emit();
@@ -77,18 +88,15 @@ fn main() {
 
 }
 
-fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: path::PathBuf) -> async_channel::Receiver<Program<I>> {
+fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, path: path::PathBuf) -> future::Boxed<Result<Program<I>, ()>> {
 
-    let file_name = path.file_stem().expect("invalid input file path").to_string_lossy().to_string();
+    async move {
 
-    if shared.opts.debug() {
-        Diagnostic::debug(format!("compiling module `{}`", file_name)).emit();
-    }
+        let file_name = path.file_stem().expect("invalid input file path").to_string_lossy().to_string();
 
-    let (sender, receiver) = async_channel::bounded(1);
-
-    let clone = Arc::clone(&shared); // todo: Dont clone here (unecessary)
-    clone.executor.spawn(async move {
+        if shared.opts.debug() {
+            Diagnostic::debug(format!("compiling module `{}`", file_name)).emit();
+        }
 
         let data = match fs::read_to_string(&path) {
             Ok(val) => val,
@@ -96,7 +104,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: pa
                 Diagnostic::error("cannot read input file")
                     .note(err.to_string())
                     .emit();
-                return
+                return Err(())
             }
         };
 
@@ -106,7 +114,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: pa
                 parser::format_error(err)
                     .file(file_name)
                     .emit();
-                return
+                return Err(())
             }
         };
 
@@ -115,16 +123,9 @@ fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: pa
         for module in source.uses.iter() {
 
             let module_path = path.join(source.arena.get(module.path));
-            let receiver = compile::<I>(Arc::clone(&shared), module_path);
-            deps.push(receiver);
+            let program = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path)).await;
+            deps.push(program);
 
-        }
-
-        let mut compiled = Vec::new();
-
-        for dep in deps {
-            let code = dep.recv().await.unwrap();
-            compiled.push(code);
         }
 
         // we now need to genrate code for the source files
@@ -138,7 +139,7 @@ fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: pa
                 basegen::format_error(err)
                     .file(file_name)
                     .emit();
-                return
+                return Err(())
             }
         };
 
@@ -149,15 +150,13 @@ fn compile<'s, I: Intrinsic + Send + 'static>(shared: Arc<SharedState>, path: pa
                     Diagnostic::debug("typecheck failed").emit();
                 }
                 typegen::format_error(err).emit();
-                return;
+                return Err(())
             }
         };
 
-        sender.send(program).await.unwrap();
+        Ok(program)
 
-    }).detach();
-
-    receiver
+    }.boxed()
 
 }
 

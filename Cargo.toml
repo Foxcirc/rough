@@ -4,9 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-channel = "2.1.0"
 async-executor = "1.6.0"
-crossbeam-channel = "0.5.8"
 fancy = "0.3.1"
 futures-lite = "2.0.1"
 nom = "7.1.3"

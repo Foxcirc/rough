@@ -14,12 +14,10 @@ impl StrArena {
         let from = self.buffer.len() as u32;
         let to = from + val.len() as u32 - 1;
         self.buffer.extend_from_slice(val.as_bytes());
-        dbg!(from, to, val.len());
         Id { from, to }
     }
 
     pub fn get<'a>(&'a self, id: Id) -> &'a str {
-        dbg!(id.from, id.to);
         std::str::from_utf8(
             &self.buffer.get(id.from as usize .. id.to as usize).expect(INVALID_ID)
         ).expect(INVALID_ID)
