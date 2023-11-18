@@ -9,7 +9,7 @@ pub mod basegen;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, fmt, fs, path, sync::Arc, thread};
+use std::{env, fmt, fs, path, sync::Arc, thread, time};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
@@ -20,12 +20,9 @@ fn main() {
     let opts = match cli::parse(env::args()) {
         Err(err) => {
             let diag = match err {
-                cli::CliError::ExpectedPath            => Diagnostic::error("expected path"),
-                cli::CliError::ExpectedMode            => Diagnostic::error("expected mode"),
-                cli::CliError::InvalidMode(other)      => Diagnostic::error("invalid mode").note(&other),
-                cli::CliError::ExpectedVerbosity       => Diagnostic::error("expected verbosity"),
-                cli::CliError::InvalidVerbosity(other) => Diagnostic::error("invalid verbosity").note(&other),
-                cli::CliError::InvalidFlag(other)      => Diagnostic::error("invalid flag").note(&other),
+                cli::CliError::Expected(what) => Diagnostic::error(format!("expected {}", what)),
+                cli::CliError::Invalid(what, got) => Diagnostic::error(format!("expected {} but got {}", what, got)),
+                cli::CliError::UnknownFlag(other) => Diagnostic::error("invalid flag").note(&other),
             };
             diag.emit();
             return
@@ -41,49 +38,97 @@ fn main() {
         Ok(opts) => opts,
     };
 
-    let path = opts.input.clone();
-    let shared = Arc::new(SharedState {
-        opts,
-        executor: async_executor::Executor::new()
-    });
+    if opts.input.file_name().is_none() {
+        Diagnostic::error("no input file provided").emit();
+        return
+    }
 
-    // asynchronously compile the input file
+    let executor = async_executor::Executor::new();
 
-    let task = shared.executor.spawn(compile::<Intel64>(Arc::clone(&shared), path));
+    let input_path = opts.input.clone();
+    let shared = Arc::new(SharedState { opts, executor });
 
+    // asynchronously compile the program
+
+    let max_threads = num_cpus::get();
+    let num_threads = shared.opts.threads.as_ref().copied().unwrap_or(max_threads).clamp(1, max_threads);
+
+    // used to determine if the compilation of the main module is done
+    let barrier = Arc::new(async_lock::Barrier::new(num_threads + 1));
+
+    // spawn the task that compiles the main program
     let shared_clone = Arc::clone(&shared);
-    let handle = thread::spawn(move || {
-        future::block_on(shared_clone.executor.run(future::pending()))
+    let barrier_clone = Arc::clone(&barrier);
+    let task = shared.executor.spawn(async move {
+        let result = compile::<Intel64>(shared_clone, input_path).await;
+        barrier_clone.wait().await; // signal to the workers that they can exit now
+        result
     });
 
-    match handle.join() {
-        Ok(()) => (),
-        Err(_err) => {
-            Diagnostic::error("worker thread panicked").emit();
-            return
-        }
-    };
+    let start_time = time::Instant::now();
+    Diagnostic::info("starting compilation")
+        .note(format!("worker threads: {}", num_threads))
+        .emit();
 
-    let program = match future::block_on(task) {
+    // spawn the worker threads
+    let mut handles = Vec::new();
+    for _ in 0..num_threads { // spawn num_threads threads
+        let shared_clone = Arc::clone(&shared);
+        let barrier_clone = Arc::clone(&barrier);
+        let handle = thread::spawn(move || {
+            future::block_on(shared_clone.executor.run(barrier_clone.wait()));
+        });
+        handles.push(handle);
+    }
+
+    // wait for all workers to finish
+    for handle in handles {
+        match handle.join() {
+            Ok(_) => (),
+            Err(_) => {
+                Diagnostic::error("worker thread panicked").emit();
+                return
+            }
+        };
+    }
+
+    let took_time = time::Instant::now() - start_time;
+    Diagnostic::info("all workers finished")
+        .note(format!("took {:?}", took_time))
+        .emit();
+
+    // get the result of the task which compiled the main module
+    // note: this will potentially still need to run the `barrier.wait().await` inside the main task
+    // if all worker threads exited as soon as the barrier became free
+    let program = match future::block_on(shared.executor.run(task)) {
         Ok(val) => val,
         Err(()) => return,
     };
 
-    if matches!(shared.opts.mode, cli::Mode::ShowIr) {
-        Diagnostic::debug("showing intermediate representation").emit();
-        debug_print_program(&program);
-    }
+    // all tasks must have completed by now
+    assert!(shared.executor.is_empty());
 
-    if matches!(shared.opts.mode, cli::Mode::Run) {
+    // now we can either evaluate the program or generate something else
 
-        match eval::eval(program) {
-            Ok(()) => (),
-            Err(err) => {
-                eval::format_error(err).emit();
-                return;
+    match shared.opts.mode {
+        cli::Mode::ShowIr => {
+            Diagnostic::info("showing intermediate representation").emit();
+            debug_print_program(&program);
+        },
+        cli::Mode::Build => {
+            Diagnostic::info("starting build").emit();
+            todo!("codegen");
+        },
+        cli::Mode::Run => {
+            Diagnostic::info("starting evaluation").emit();
+            match eval::eval(program) {
+                Ok(()) => (),
+                Err(err) => {
+                    eval::format_error(err).emit();
+                    return;
+                }
             }
         }
-
     }
 
 }
@@ -92,17 +137,17 @@ fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, pat
 
     async move {
 
-        let file_name = path.file_stem().expect("invalid input file path").to_string_lossy().to_string();
+        let module_name = path.to_string_lossy().to_string();
 
         if shared.opts.debug() {
-            Diagnostic::debug(format!("compiling module `{}`", file_name)).emit();
+            Diagnostic::debug(format!("compiling module `{}`", module_name)).emit();
         }
 
         let data = match fs::read_to_string(&path) {
             Ok(val) => val,
             Err(err) => {
                 Diagnostic::error("cannot read input file")
-                    .note(err.to_string())
+                    .note(err.to_string().to_lowercase())
                     .emit();
                 return Err(())
             }
@@ -112,7 +157,7 @@ fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, pat
             Ok(val) => val,
             Err(err) => {
                 parser::format_error(err)
-                    .file(file_name)
+                    .file(module_name)
                     .emit();
                 return Err(())
             }
@@ -122,7 +167,7 @@ fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, pat
 
         for module in source.uses.iter() {
 
-            let module_path = path.join(source.arena.get(module.path));
+            let module_path = path.with_file_name("").join(source.arena.get(module.path));
             let program = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path)).await;
             deps.push(program);
 
@@ -137,7 +182,7 @@ fn compile<I: Intrinsic + Send + 'static>(shared: Arc<SharedState<'static>>, pat
                     Diagnostic::debug("codegen failed").emit();
                 }
                 basegen::format_error(err)
-                    .file(file_name)
+                    .file(module_name)
                     .emit();
                 return Err(())
             }
@@ -233,28 +278,22 @@ usage: rh <file> [options]
     -o --output <path>              Output file/directory path
     -m --mode <mode>                Select the compiler mode
     -v --verbosity <verbosity>      Select the verbosity level
+    --threads <number>              Set the number of worker threads
 
 [mode]:
     build                           Build the program
     run (default)                   Interpret the program
-    show-items                      Show the parsed item list
-    show-ir                         Show the intermediate representation
+    show                            Show the intermediate representation
 
 [verbosity]:
     quiet                           Shows only the output from your program.
-    info (default)                  Shows some basic infos.
-    debug                           Also shows timings.
+    info (default)                  Shows some basic information.
+    debug                           Shows more verbose debug information.
 
-tldr:
+examples:
 
-run `main.rh` (interpreted)
-$ rh main.rh
-
-build `main.rh` (compiled)
-$ rh main.rh -m build
-
-set the verbosity to `debug`
-$ rn main.rh -v debug
+$ rh main.rh                        Run main.rh (interpreted)
+$ rh main.rh -m build               Build main.rh (compiled, produces binary)
 "#;
 
     pub(crate) fn parse(mut args: impl Iterator<Item = String>) -> Result<Opts, CliError> {
@@ -270,28 +309,34 @@ $ rn main.rh -v debug
                 Some("--version")     => opts.help = Help::Version,
                 Some("-i" | "--input")  => opts.input = match args.next() {
                     Some(path) => PathBuf::from(path),
-                    None => return Err(CliError::ExpectedPath)
+                    None => return Err(CliError::Expected("path"))
                 },
                 Some("-o" | "--output") => opts.output = match args.next() {
                     Some(path) => PathBuf::from(path),
-                    None => return Err(CliError::ExpectedPath)
+                    None => return Err(CliError::Expected("path"))
                 },
                 Some("-m" | "--mode") => opts.mode = match args.next().as_deref() {
                     Some("build")      => Mode::Build,
                     Some("run")        => Mode::Run,
-                    Some("show-items") => Mode::ShowItems,
-                    Some("show-ir")    => Mode::ShowIr,
-                    Some(other)        => return Err(CliError::InvalidMode(other.to_string())),
-                    None               => return Err(CliError::ExpectedMode)
+                    Some("show")       => Mode::ShowIr,
+                    Some(other)        => return Err(CliError::Invalid("mode", other.to_string())),
+                    None               => return Err(CliError::Expected("mode"))
                 },
                 Some("-v" | "--verbosity") => opts.verbosity = match args.next().as_deref() {
                     Some("quiet") => Verbosity::Quiet,
                     Some("info")  => Verbosity::Info,
                     Some("debug") => Verbosity::Debug,
-                    Some(other)   => return Err(CliError::InvalidVerbosity(other.to_string())),
-                    None          => return Err(CliError::ExpectedVerbosity)
+                    Some(other)   => return Err(CliError::Invalid("verbosity", other.to_string())),
+                    None          => return Err(CliError::Expected("verbosity"))
                 },
-                Some(other) if other.starts_with('-') => return Err(CliError::InvalidFlag(other.to_string())),
+                Some("--threads") => opts.threads = match args.next() {
+                    Some(num) => match usize::from_str_radix(&num, 10) {
+                        Ok(val) => Some(val),
+                        Err(_) => return Err(CliError::Invalid("number", num))
+                    },
+                    None => return Err(CliError::Expected("number"))
+                },
+                Some(other) if other.starts_with('-') => return Err(CliError::UnknownFlag(other.to_string())),
                 Some(other)                           => opts.input = PathBuf::from(other),
                 None => break,
             }
@@ -302,12 +347,9 @@ $ rn main.rh -v debug
     }
 
     pub(crate) enum CliError {
-        ExpectedPath,
-        ExpectedMode,
-        InvalidMode(String),
-        ExpectedVerbosity,
-        InvalidVerbosity(String),
-        InvalidFlag(String),
+        Expected(&'static str),
+        Invalid(&'static str, String),
+        UnknownFlag(String),
     }
 
     #[derive(Default)]
@@ -317,6 +359,7 @@ $ rn main.rh -v debug
         pub(crate) output: PathBuf,
         pub(crate) mode: Mode,
         pub(crate) verbosity: Verbosity,
+        pub(crate) threads: Option<usize>,
     }
 
     impl Opts {
@@ -346,7 +389,6 @@ $ rn main.rh -v debug
         Build,
         #[default]
         Run,
-        ShowItems,
         ShowIr,
     }
 

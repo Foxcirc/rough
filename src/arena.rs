@@ -12,7 +12,7 @@ impl StrArena {
 
     pub fn put(&mut self, val: &str) -> Id {
         let from = self.buffer.len() as u32;
-        let to = from + val.len() as u32 - 1;
+        let to = from + val.len() as u32;
         self.buffer.extend_from_slice(val.as_bytes());
         Id { from, to }
     }

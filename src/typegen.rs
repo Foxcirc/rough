@@ -3,7 +3,10 @@ use crate::{basegen::{FileSpan, Symbols, Program}, parser::Span, arch::Intrinsic
 
 pub(crate) fn typecheck<I: Intrinsic>(program: Symbols<I>) -> Result<Program<I>, TypeError> {
 
-    todo!()
+    Ok(Program {
+        funs: Default::default(),
+        types: Default::default(),
+    })
 
 }
 
