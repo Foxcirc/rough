@@ -6,19 +6,32 @@ use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, TranslationUnit,
 pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Result<TranslationUnit<BaseProgram<I>>, CodegenError> {
 
     let mut part = TranslationUnit {
-        inner: BaseProgram::default(),
+        inner: BaseProgram {
+            funs: HashMap::with_capacity(source.inner.funs.len()),
+            types: HashMap::with_capacity(source.inner.types.len())
+        },
         arena: source.arena
     };
 
     for item in source.inner.funs.into_iter() {
 
         // generate bytecode for the signature
-        let mut signature_state = State::<I>::with_arena(&part.arena);
+        let mut signature_state = State {
+            bytecode: Vec::with_capacity(item.signature.len()),
+            counter: 0,
+            arena: &part.arena
+        };
+
         codegen_block(&mut signature_state, item.signature, None)?;
-        signature_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
+        signature_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span)); // todo: generate return for signature?
 
         // generate bytecode for the body
-        let mut body_state = State::<I>::with_arena(&part.arena);
+        let mut body_state = State {
+            bytecode: Vec::with_capacity(item.body.len()),
+            counter: 0,
+            arena: &part.arena
+        };
+
         codegen_block(&mut body_state, item.body, None)?;
         body_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span));
 
@@ -253,13 +266,6 @@ struct State<'a, I> {
 }
 
 impl<'a, I> State<'a, I> {
-    fn with_arena(arena: &'a arena::StrArena) -> Self {
-        Self {
-            bytecode: Vec::new(),
-            counter: 0,
-            arena
-        }
-    }
     pub fn next_label(&mut self) -> usize {
         self.counter += 1;
         self.counter
