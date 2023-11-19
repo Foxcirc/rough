@@ -42,8 +42,17 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
         match op.kind {
 
             OpKind::Nop => (),
-            OpKind::Push { value: Literal::Tuple(_tuple) } => todo!(),
-            OpKind::Push { value } => state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span)),
+            OpKind::Push { value: Literal::Tuple(tuple) } => {
+                // generate instructions for this tuple
+                let mut inner_state = State { bytecode: Vec::new(), counter: state.counter, arena: state.arena };
+                codegen_block(&mut inner_state, tuple, None)?;
+                let value = InstrLiteral::Tuple(inner_state.bytecode);
+                state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span))
+            },
+            OpKind::Push { value: parsed } => {
+                let value = InstrLiteral::from_literal(parsed);
+                state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span))
+            },
 
             OpKind::Call { name }  => {
                 let inrinsic = I::generate(&*state.arena.get(name));
@@ -62,10 +71,9 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Drop  => state.bytecode.push(Instr::spanned(InstrKind::Drop, op.span)),
 
             OpKind::Read  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)),
-            OpKind::Move  => state.bytecode.push(Instr::spanned(InstrKind::Read,  op.span)), // todo: implement variable move
+            OpKind::Move  => state.bytecode.push(Instr::spanned(InstrKind::Move,  op.span)),
             OpKind::Write => state.bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
 
-            // OpKind::Move  => todo!(),
             OpKind::Addr   => todo!(),
             OpKind::Type   => todo!(),
             OpKind::Size   => todo!(),
@@ -139,6 +147,25 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum InstrLiteral<I> {
+    Int(usize),
+    Bool(bool),
+    Str(String),
+    Tuple(Vec<Instr<I>>),
+}
+
+impl<I> InstrLiteral<I> {
+    pub fn from_literal(parsed: Literal) -> Self {
+        match parsed {
+            Literal::Int(val)  => Self::Int(val),
+            Literal::Bool(val) => Self::Bool(val),
+            Literal::Str(val)  => Self::Str(val),
+            Literal::Tuple(..) => unreachable!(),
+        }
+    }
+}
+
 #[derive(PartialEq, Eq)]
 pub(crate) struct Instr<I> {
     pub(crate) kind: InstrKind<I>,
@@ -162,7 +189,7 @@ pub(crate) enum InstrKind<I> {
 
     Label { label: Label, producer: Producer }, // todo: rename?
 
-    Push { value: Literal },
+    Push { value: InstrLiteral<I> },
 
     Call { to: IdentStr },
     Return,
@@ -175,8 +202,8 @@ pub(crate) enum InstrKind<I> {
     Rot4,
 
     Read,
+    Move,
     Write,
-    // Move,
 
     // Addr,
     // Type,

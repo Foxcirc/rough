@@ -402,7 +402,6 @@ pub(crate) enum Literal {
     Int(usize),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
-    Type(Type),
     Tuple(Vec<Op>),
 }
 

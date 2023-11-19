@@ -1,21 +1,7 @@
 
-type Box
-
 fn main {
-    42 -print-int
-    "→ Rough times ←"
-}
-
-fn -print-int {
-    add if {
-
-    }
-    sub elif {
-
-    }
-    else {
-
-    }
-
+    Foo = foo
+    10 foo:add
+    10 foo > :add ~
 }
 
