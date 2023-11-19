@@ -158,25 +158,18 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
         if let Some(val) = guard.get(&path) {
 
             // possibly already compiling in another task
-            if let CompilationState::InProgress(waitstate) = val {
+            if let CompilationState::InProgress(waiter) = val {
 
                 if shared.opts.debug() {
                     Diagnostic::debug(format!("waiting for module `{}`", module_name)).emit();
                 }
 
-                let cloned = Arc::clone(&waitstate);
-                let listener = event_listener::EventListener::new(&cloned.event);
+                let cloned = Arc::clone(&waiter);
 
                 drop(guard);
 
-                futures_lite::pin!(listener);
-
                 // wait for the compilation to finish
-                loop {
-                    if cloned.flag.load(Ordering::Acquire) { break }
-                    if listener.as_mut().is_listening() { listener.as_mut().await }
-                    else { listener.as_mut().listen() }
-                }
+                cloned.wait().await;
 
             } else {
 
@@ -204,9 +197,9 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
         drop(guard);
 
         // tell other tasks that this module is being worked on already
-        let waitstate = WaitState { event: event_listener::Event::new(), flag: AtomicBool::new(false) };
+        let waiter = Arc::new(Waiter::new());
         let mut guard = shared.cache.write().await;
-        guard.insert(path.clone(), CompilationState::InProgress(Arc::new(waitstate)));
+        guard.insert(path.clone(), CompilationState::InProgress(waiter));
         drop(guard);
 
         if shared.opts.debug() {
@@ -311,13 +304,31 @@ struct SharedState<'a, I: Send + Sync> {
 }
 
 enum CompilationState<I> {
-    InProgress(Arc<WaitState>), // inside an Arc, so we can access it without always holding the lock
+    InProgress(Arc<Waiter>), // inside an Arc, so we can access it without always holding the lock
     Done(Arc<TranslationUnit<Program<I>>>) // inside an Arc, so we can access it without always holding the lock
 }
 
-struct WaitState {
+struct Waiter {
     pub event: event_listener::Event,
     pub flag: AtomicBool
+}
+
+impl Waiter {
+    pub fn new() -> Self {
+        Self {
+            event: event_listener::Event::new(),
+            flag: AtomicBool::new(false)
+        }
+    }
+    pub async fn wait(&self) {
+        let listener = event_listener::EventListener::new(&self.event);
+        futures_lite::pin!(listener);
+        loop {
+            if self.flag.load(Ordering::Acquire) { break }
+            if listener.as_mut().is_listening() { listener.as_mut().await }
+            else { listener.as_mut().listen() }
+        }
+    }
 }
 
 pub(crate) mod arch {
