@@ -22,6 +22,7 @@ pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Res
             arena: &part.arena
         };
 
+        // todo: process signature as a tuple and generalize basegen for tuples
         codegen_block(&mut signature_state, item.signature, None)?;
         signature_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span)); // todo: generate return for signature?
 

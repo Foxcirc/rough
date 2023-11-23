@@ -319,7 +319,7 @@ pub(crate) enum Type {
     // Any,
     // standard types
     Int,
-    // Bool,
+    Bool,
     // Char,
     // Ptr { inner: Box<Type> }, // todo: add slice type
     // fine-grained integer types

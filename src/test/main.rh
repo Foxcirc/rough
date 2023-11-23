@@ -1,42 +1,5 @@
 
-// library pthread {
-//     fn create-thread (int ptr int -> int)
-// }
-
 fn main {
-    1 2 just-add ~
-}
-
-fn just-add (variadic) {
-    add
-}
-
-fn foo {
-
-    10 for { put }
-    
-    10 :into-iter loop {
-        :next if {
-            put
-        } else {
-            ~ break
-        }
-    }
-
-}
-
-trait IntoIter {
-    & "into-iter" std:meta:has-fn
-    ~
-}
-
-trait Iter {
-    & "into-iter" std:meta:has-fn
-    ~
-}
-
-impl (Iter std:meta:has-trait) {
-    statisfies IntoIter
-    fn into-iter (self -> self) { identity }
+    1 2 add ~
 }
 

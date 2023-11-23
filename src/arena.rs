@@ -1,4 +1,6 @@
 
+// todo: move into util
+
 use std::fmt;
 
 const INVALID_ID: &str = "invalid id for this arena";
