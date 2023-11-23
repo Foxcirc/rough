@@ -193,8 +193,9 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
                 unreachable!()
             }
 
+        } else {
+            drop(guard);
         }
-        drop(guard);
 
         // tell other tasks that this module is being worked on already
         let waiter = Arc::new(Waiter::new());
