@@ -1,21 +1,25 @@
 
-use crate::{basegen::{FileSpan, BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type, Literal}, arch::Intrinsic, diagnostic::Diagnostic};
+use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type}, arch::Intrinsic, diagnostic::Diagnostic};
 
-pub(crate) fn typecheck<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
+pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
     let mut part = TranslationUnit {
         inner: Program { funs: Default::default(), types: Default::default() },
         arena: base_program.arena,
+        main: base_program.main,
     };
 
-    for (_fun_name, fun) in base_program.inner.funs {
+    // for (_fun_name, fun) in base_program.inner.funs {
 
-        let mut state = State {
-            stack: Vec::new(),
-        };
-        typecheck_fun(&mut state, fun)?;
+    //     let mut state = State {
+    //         stack: Vec::new(),
+    //     };
+    //     typecheck_fun(&mut state, fun)?;
 
-    }
+    // }
+
+    part.inner.funs = base_program.inner.funs;
+    part.inner.types = base_program.inner.types;
 
     Ok(part)
 
@@ -47,7 +51,7 @@ fn typecheck_fun<I: Intrinsic>(state: &mut State<I>, fun: FunWithMetadata<I>) ->
             InstrKind::Move  => todo!(),
             InstrKind::Write => todo!(),
 
-            // InstrKind::Addr => todo!(),
+            InstrKind::Addr => todo!(),
             // InstrKind::Type => todo!(),
             // InstrKind::Size => todo!(),
 
@@ -110,12 +114,12 @@ pub(crate) type Value<I> = InstrLiteral<I>;
 
 pub(crate) struct TypeError {
     kind: TypeErrorKind,
-    file_span: FileSpan,
+    span: Span,
 }
 
 impl TypeError {
-    pub(crate) fn unspanned(kind: TypeErrorKind) -> Self {
-        Self { kind, file_span: FileSpan::default() }
+    pub(crate) fn spanned(kind: TypeErrorKind, span: Span) -> Self {
+        Self { kind, span }
     }
 }
 
@@ -124,6 +128,7 @@ pub(crate) enum TypeErrorKind {
     BranchesNotEmpty,
     BranchesNotEqual,
     Mismatch { want: Vec<()>, got: Vec<()> },
+    Error,
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
@@ -142,13 +147,9 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
             Diagnostic::error("type mismatch")
                 .note(format!("want {:?}", want.into_iter().map(|val| val).collect::<Vec<_>>()))
                 .note(format!("got {:?}", got .into_iter().map(|val| val).collect::<Vec<_>>()))
-        }
+        },
+        TypeErrorKind::Error => Diagnostic::error("TODO: IMPLEMENT TYPE ERROR")
     };
-    if value.file_span.span != Span::default() {
-        diag.file(&value.file_span.file)
-            .pos(value.file_span.span.to_pos())
-    } else {
-        diag
-    }
+    diag
 }
 

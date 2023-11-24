@@ -135,7 +135,7 @@ fn main() {
         },
         cli::Mode::Run => {
             Diagnostic::info("starting evaluation").emit();
-            match eval::eval(program.inner) {
+            match eval::eval(program) {
                 Ok(()) => (),
                 Err(err) => {
                     eval::format_error(err).emit();
@@ -239,17 +239,8 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
         }
 
-        // wait for all the dependencies to be built
-        let results = util::join_all(futs).await;
-        let mut deps = Vec::with_capacity(results.len());
-        for result in results {
-            deps.push(result?);
-        }
-
-        drop(deps); // <- do something with the dependencies
-
-        // we now can genrate code for this translation unit
-
+        // we can generate scaffolding code for this module
+        // independently of it's dependencies
         let base_program = match basegen::basegen(source) {
             Ok(val) => val,
             Err(err) => {
@@ -263,11 +254,22 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             }
         };
 
-        let program = match typegen::typecheck(base_program) {
+        // wait for all the dependencies to be built
+        let results = util::join_all(futs).await;
+        let mut deps = Vec::with_capacity(results.len());
+        for result in results {
+            deps.push(result?);
+        }
+
+        drop(deps); // <- do something with the dependencies
+
+        // now we generate the final, typechecked program code
+        // for this we need the dependencies
+        let program = match typegen::typegen(base_program) {
             Ok(val) => val,
             Err(err) => {
                 if shared.opts.debug() {
-                    Diagnostic::debug("typecheck failed").emit();
+                    Diagnostic::debug("typegen failed").emit();
                 }
                 typegen::format_error(err).emit();
                 return Err(())
@@ -376,10 +378,14 @@ pub(crate) mod arch {
 }
 
 fn debug_print_program<I: fmt::Debug>(program: &Program<I>) {
-    for (_name, fun) in program.funs.iter() {
-        // eprintln!("fn {}:", program.arena.get(*name));
-        for (idx, instruction) in fun.body.iter().enumerate() {
-            eprintln!("{:3}: {:?}", idx, instruction);
+    if program.funs.len() == 0 {
+        eprintln!("<empty>");
+    } else {
+        for (_name, fun) in program.funs.iter() {
+            // eprintln!("fn {}:", program.arena.get(*name));
+            for (idx, instruction) in fun.body.iter().enumerate() {
+                eprintln!("{:3}: {:?}", idx, instruction);
+            }
         }
     }
 }

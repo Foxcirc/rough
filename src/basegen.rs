@@ -1,7 +1,7 @@
 
 
 use std::{fmt, collections::HashMap, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, IdentStr, Type, TranslationUnit, ParsedItems}, diagnostic::Diagnostic, arch::Intrinsic, arena};
+use crate::{parser::{Literal, OpKind, Op, Span, Identifier, Type, TranslationUnit, ParsedItems}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
 pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Result<TranslationUnit<BaseProgram<I>>, CodegenError> {
 
@@ -10,7 +10,8 @@ pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Res
             funs: HashMap::with_capacity(source.inner.funs.len()),
             types: HashMap::with_capacity(source.inner.types.len())
         },
-        arena: source.arena
+        arena: source.arena,
+        main: source.main
     };
 
     for item in source.inner.funs.into_iter() {
@@ -88,7 +89,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Move  => state.bytecode.push(Instr::spanned(InstrKind::Move,  op.span)),
             OpKind::Write => state.bytecode.push(Instr::spanned(InstrKind::Write, op.span)),
 
-            OpKind::Addr   => todo!(),
+            OpKind::Addr   => state.bytecode.push(Instr::spanned(InstrKind::Addr, op.span)),
             OpKind::Type   => todo!(),
             OpKind::Size   => todo!(),
             OpKind::Access => todo!(),
@@ -205,7 +206,7 @@ pub(crate) enum InstrKind<I> {
 
     Push { value: InstrLiteral<I> },
 
-    Call { to: IdentStr },
+    Call { to: Identifier },
     Return,
 
     Drop,
@@ -219,7 +220,7 @@ pub(crate) enum InstrKind<I> {
     Move,
     Write,
 
-    // Addr,
+    Addr,
     // Type,
     // Size,
 
@@ -274,7 +275,7 @@ impl<'a, I> State<'a, I> {
 }
 
 pub(crate) struct BaseProgram<I> {
-    pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
+    pub funs: HashMap<Identifier, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
 
@@ -289,7 +290,7 @@ impl<I> Default for BaseProgram<I> {
 }
 
 pub(crate) struct Program<I> {
-    pub funs: HashMap<IdentStr, FunWithMetadata<I>>,
+    pub funs: HashMap<Identifier, FunWithMetadata<I>>,
     pub types: HashMap<Cow<'static, str>, Type>,
 }
 
@@ -304,16 +305,10 @@ fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer:
     find_instr_kind(bytecode, InstrKind::Label { label, producer })
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct FunWithMetadata<I> { // todo: rename to basegenFun
     pub signature: Bytecode<I>,
     pub body: Bytecode<I>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct FileSpan {
-    pub span: Span,
-    pub file: String,
 }
 
 pub(crate) struct CodegenError {

@@ -2,7 +2,7 @@
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
 use std::cell::RefCell;
-use crate::{diagnostic, arena};
+use crate::{diagnostic, arena::{self, StrArena}};
 
 pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, FinalParseError<'d>> {
     let arena = RefCell::new(arena::StrArena::default());
@@ -24,19 +24,43 @@ fn ignore_extra<'a, 'b>(val: ParseError<'a, 'b>) -> FinalParseError<'a> {
 
 pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, TranslationUnit<ParsedItems>> {
     terminated(
-        fold_many0(delimited(multispace0, parse_item, multispace0), TranslationUnit::default, assign_item),
+        map(
+            fold_many0(
+                delimited(multispace0, parse_item, multispace0),
+                Accumulator::with_arena(dat.extra),
+                assign_item
+            ),
+            |acc| acc.value
+        ),
         context("expected top level item", pair(multispace0, eof)) // this is there to allow empty files
     )(dat)
 }
 
-fn assign_item<'a>(mut dest: TranslationUnit<ParsedItems>, item: Item) -> TranslationUnit<ParsedItems> {
+struct Accumulator<'a> {
+    pub arena: &'a RefCell<StrArena>,
+    pub value: TranslationUnit<ParsedItems>,
+}
+
+impl<'a> Accumulator<'a> {
+    fn with_arena(arena: &'a RefCell<StrArena>) -> impl FnMut() -> Accumulator<'a> {
+        move || Self { arena, value: TranslationUnit::default() }
+    }
+}
+
+fn assign_item<'a>(mut acc: Accumulator, item: Item) -> Accumulator {
     match item {
         Item::Comment      => (),
-        Item::Use(val)     => dest.inner.uses.push(val),
-        Item::FunDef(val)  => dest.inner.funs.push(val),
-        Item::TypeDef(val) => dest.inner.types.push(val),
+        Item::Use(val)     => acc.value.inner.uses.push(val),
+        Item::FunDef(val)  => {
+            // save the main fn's id for execution later
+            if acc.arena.borrow().get(val.name) == "main" {
+                acc.value.main = Some(val.name);
+            }
+            acc.value.inner.funs.push(val)
+        },
+        Item::TypeDef(val) => acc.value.inner.types.push(val),
     }
-    dest
+    acc
 }
 
 pub(crate) fn parse_item<'a, 'b>(dat: ParseInput<'a, 'b>) ->  ParseResult<'a, 'b, Item> {
@@ -184,7 +208,7 @@ pub(crate) fn parse_integer<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 
     result
 }
 
-pub(crate) fn parse_ident<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, IdentStr> {
+pub(crate) fn parse_ident<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Identifier> {
     map(
         context("identifier cannot be a keyword", verify(
             context("expected identifier", recognize(pair(alpha1, many0(alt((alphanumeric1, tag("-"))))))),
@@ -194,7 +218,7 @@ pub(crate) fn parse_ident<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b
     )(dat)
 }
 
-pub(crate) fn parse_str_basic<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, IdentStr> {
+pub(crate) fn parse_str_basic<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, Identifier> {
     context("expected string literal", map(
         delimited(char('\"'), is_not("\""), char('\"')),
         to_identstr
@@ -276,6 +300,7 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
 pub(crate) struct TranslationUnit<T> {
     pub inner: T,
     pub arena: arena::StrArena,
+    pub main: Option<arena::Id>,
 }
 
 #[derive(Debug, Default)]
@@ -295,12 +320,12 @@ pub(crate) enum Item {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Use {
-    pub path: IdentStr,
+    pub path: Identifier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct FunDef {
-    pub name: IdentStr,
+    pub name: Identifier,
     pub span: Span,
     pub signature: Vec<Op>,
     pub body: Vec<Op>,
@@ -308,7 +333,7 @@ pub(crate) struct FunDef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TypeDef {
-    pub name: IdentStr,
+    pub name: Identifier,
     pub span: Span,
     pub signature: Vec<Op>,
 }
@@ -352,7 +377,7 @@ pub(crate) enum OpKind {
     Nop, // this is currently only used to implement comments
     Push { value: Literal },
 
-    Call { name: IdentStr },
+    Call { name: Identifier },
 
     Copy,
     Over,
@@ -405,9 +430,9 @@ pub(crate) enum Literal {
     Tuple(Vec<Op>),
 }
 
-pub(crate) type IdentStr = arena::Id;
+pub(crate) type Identifier = arena::Id;
 
-fn to_identstr(value: ParseInput) -> IdentStr {
+fn to_identstr(value: ParseInput) -> Identifier {
     let mut arena = value.extra.borrow_mut();
     arena.put(value.fragment()) // allocate the literal inside the arena
 }
