@@ -338,11 +338,11 @@ impl Waiter {
 
 pub(crate) mod arch {
 
-    use crate::parser::Type;
+    use crate::{parser::Type, typegen};
 
     pub(crate) trait Intrinsic: Clone + PartialEq + Eq {
-        fn generate(name: &str) -> Option<Self> where Self: Sized;
-        fn signature(&self) -> &[&[Type]; 2];
+        fn basegen(name: &str) -> Option<Self> where Self: Sized;
+        fn typegen(&self, state: &mut typegen::State);
     }
 
     #[derive(Debug, PartialEq, Eq, Clone)] // todo: clean up all derives everywhere
@@ -355,7 +355,7 @@ pub(crate) mod arch {
     }
 
     impl Intrinsic for Intel64 {
-        fn generate(name: &str) -> Option<Self> {
+        fn basegen(name: &str) -> Option<Self> {
             match name {
                 "syscall-1" => Some(Self::Syscall1),
                 "syscall-2" => Some(Self::Syscall2),
@@ -365,15 +365,8 @@ pub(crate) mod arch {
                 _other => None,
             }
         }
-        fn signature(&self) -> &[&[Type]; 2] {
-            const INT: Type = Type::Int;
-            match self {
-                Self::Syscall1 => &[&[INT; 1], &[INT]],
-                Self::Syscall2 => &[&[INT; 2], &[INT]],
-                Self::Syscall3 => &[&[INT; 3], &[INT]],
-                Self::Syscall4 => &[&[INT; 4], &[INT]],
-                Self::Syscall5 => &[&[INT; 5], &[INT]],
-            }
+        fn typegen(&self, state: &mut typegen::State) {
+            todo!("typecheck Intel64 intrinsic")
         }
     }
 

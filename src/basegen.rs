@@ -70,7 +70,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             },
 
             OpKind::Call { name }  => {
-                let inrinsic = I::generate(&*state.arena.get(name));
+                let inrinsic = I::basegen(&*state.arena.get(name));
                 let result = match inrinsic {
                     Some(val) => InstrKind::Intrinsic(val),
                     None => InstrKind::Call { to: name }

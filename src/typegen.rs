@@ -57,15 +57,13 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
             InstrKind::Label { label, producer } => todo!(),
 
-            InstrKind::Push { value: InstrLiteral::Int(number) } => {
-                state.borrow_mut().push_int(number)
-            },
+            InstrKind::Push { value: InstrLiteral::Int(number) } => state.borrow_mut().push_int(number),
             InstrKind::Push { .. } => todo!(),
 
             InstrKind::Call { to } => todo!(),
             InstrKind::Return => return Ok(()),
 
-            InstrKind::Drop => todo!(),
+            InstrKind::Drop => drop(state.borrow_mut().pop_int()),
             InstrKind::Dup  => todo!(),
             InstrKind::Over => todo!(),
             InstrKind::Swap => todo!(),
@@ -103,7 +101,12 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
             InstrKind::Bne { to } => todo!(),
             InstrKind::Bra { to } => todo!(),
 
-            InstrKind::Intrinsic(intrinsic) => todo!(),
+            InstrKind::Intrinsic(intrinsic) => {
+                RefMut::map(state.borrow_mut(), |state| {
+                    I::typegen(&intrinsic, state); // this can basically do anything
+                    state
+                });
+            }
 
         }
 
@@ -114,7 +117,7 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 }
 
 // very similar to the state in eval
-struct State<'a> {
+pub(crate) struct State<'a> {
     common: CommonState<'a>,
     pub types: Vec<Item>,
 }
