@@ -340,12 +340,12 @@ pub(crate) mod arch {
 
     use crate::parser::Type;
 
-    pub(crate) trait Intrinsic: PartialEq + Eq {
+    pub(crate) trait Intrinsic: Clone + PartialEq + Eq {
         fn generate(name: &str) -> Option<Self> where Self: Sized;
         fn signature(&self) -> &[&[Type]; 2];
     }
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, PartialEq, Eq, Clone)] // todo: clean up all derives everywhere
     pub(crate) enum Intel64 {
         Syscall1,
         Syscall2,

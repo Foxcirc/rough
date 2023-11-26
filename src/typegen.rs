@@ -1,22 +1,44 @@
 
-use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type}, arch::Intrinsic, diagnostic::Diagnostic};
+use std::cell::{RefCell, RefMut};
+
+use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type}, arch::Intrinsic, diagnostic::Diagnostic, arena, eval::{self, MemoryPtr, CommonState}};
 
 pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
     let mut part = TranslationUnit {
-        inner: Program { funs: Default::default(), types: Default::default() },
+        inner: Program {
+            funs: Default::default(), types: Default::default(),
+        },
         arena: base_program.arena,
         main: base_program.main,
     };
 
-    // for (_fun_name, fun) in base_program.inner.funs {
+    let mut memory = eval::Memory::new();
+    // allocate statics here
 
-    //     let mut state = State {
-    //         stack: Vec::new(),
-    //     };
-    //     typecheck_fun(&mut state, fun)?;
+    // set up the stack
+    let stack = memory.alloc(1024, 8).expect("allocate stack memory"); // todo: make the stack grow when it needs more space
 
-    // }
+    let state = State {
+        common: CommonState {
+            arena: &part.arena,
+            memory,
+            stack,
+        },
+        types: Vec::new(),
+    };
+
+    let cell = RefCell::new(state);
+
+    for (_fun_name, fun) in base_program.inner.funs.clone() {
+
+        typecheck_fun(&cell, fun)?;
+
+    }
+
+    let mut state = cell.into_inner();
+    state.common.memory.dealloc(state.common.stack).expect("deallocate stack memory");
+    assert!(state.common.memory.allocations() == 0, "some memory was leaked");
 
     part.inner.funs = base_program.inner.funs;
     part.inner.types = base_program.inner.types;
@@ -25,7 +47,7 @@ pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>
 
 }
 
-fn typecheck_fun<I: Intrinsic>(state: &mut State<I>, fun: FunWithMetadata<I>) -> Result<(), TypeError> {
+fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) -> Result<(), TypeError> {
 
     // todo: push signature onto the stack
     
@@ -35,13 +57,16 @@ fn typecheck_fun<I: Intrinsic>(state: &mut State<I>, fun: FunWithMetadata<I>) ->
 
             InstrKind::Label { label, producer } => todo!(),
 
-            InstrKind::Push { value } => state.stack.push(Item::literal(value)),
+            InstrKind::Push { value: InstrLiteral::Int(number) } => {
+                state.borrow_mut().common.push_int(number)
+            },
+            InstrKind::Push { .. } => todo!(),
 
             InstrKind::Call { to } => todo!(),
-            InstrKind::Return => todo!(),
+            InstrKind::Return => return Ok(()),
 
             InstrKind::Drop => todo!(),
-            InstrKind::Dup => todo!(),
+            InstrKind::Dup  => todo!(),
             InstrKind::Over => todo!(),
             InstrKind::Swap => todo!(),
             InstrKind::Rot3 => todo!(),
@@ -84,33 +109,32 @@ fn typecheck_fun<I: Intrinsic>(state: &mut State<I>, fun: FunWithMetadata<I>) ->
 
     }
 
-    Ok(())
+    unreachable!();
 
 }
 
-struct State<I> {
-    pub stack: Vec<Item<I>>,
+// very similar to the state in eval
+struct State<'a> {
+    pub common: CommonState<'a>,
+    pub types: Vec<Item>,
 }
 
-pub(crate) enum Item<I> {
-    Comptime { t: Type, v: Value<I> },
-    Runtime { t: Type }
-}
+impl<'a> State<'a> {
 
-impl<I> Item<I> {
+    pub fn push_int(&mut self, value: usize) {
+        self.common.push_int(value)
+    }
 
-    pub fn literal(lit: InstrLiteral<I>) -> Self {
-        match lit {
-            InstrLiteral::Int   (..) => Self::Comptime { t: Type::Int, v: lit },
-            InstrLiteral::Bool  (..) => Self::Comptime { t: Type::Bool, v: lit },
-            InstrLiteral::Str   (..) => todo!(),
-            InstrLiteral::Tuple (..) => todo!(),
-        }
+    pub fn pop_int(&mut self) -> usize {
+        self.common.pop_int()
     }
 
 }
 
-pub(crate) type Value<I> = InstrLiteral<I>;
+pub(crate) struct Item {
+    comptime: bool,
+    t: Type,
+}
 
 pub(crate) struct TypeError {
     kind: TypeErrorKind,

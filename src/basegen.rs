@@ -162,7 +162,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum InstrLiteral<I> {
     Int(usize),
     Bool(bool),
@@ -181,7 +181,7 @@ impl<I> InstrLiteral<I> {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub(crate) struct Instr<I> {
     pub(crate) kind: InstrKind<I>,
     pub(crate) span: Span,
@@ -199,7 +199,7 @@ impl<I> Instr<I> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum InstrKind<I> {
 
     Label { label: Label, producer: Producer }, // todo: rename?
@@ -305,7 +305,7 @@ fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer:
     find_instr_kind(bytecode, InstrKind::Label { label, producer })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct FunWithMetadata<I> { // todo: rename to basegenFun
     pub signature: Bytecode<I>,
     pub body: Bytecode<I>,

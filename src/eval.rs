@@ -15,16 +15,17 @@ pub(crate) fn eval<I: Intrinsic>(input: TranslationUnit<Program<I>>) -> Result<(
     let mut memory = Memory::new();
 
     // set up the stack
-    let allocation = memory.alloc(1024, 8).expect("allocate stack memory"); // todo: calculate needed size during typegen
-    let stack = Stack::new(allocation);
+    let stack = memory.alloc(1024, 8).expect("allocate stack memory"); // todo: calculate needed size during typegen
 
     // todo: push statics (str literals) onto the stack and set them up
     // todo: do all of this alrdy in the typegen?? setup stack alrdy in typegen??
 
     let mut state = State {
-        arena: input.arena,
-        memory,
-        stack,
+        common: CommonState {
+            arena: &input.arena,
+            memory,
+            stack,
+        }
     };
 
     let fun = match input.main {
@@ -46,15 +47,13 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
 
             InstrKind::Label { label, producer } => todo!(),
 
-            InstrKind::Push { value: InstrLiteral::Int(number) } => state.stack.push_int(&mut state.memory, *number),
+            InstrKind::Push { value: InstrLiteral::Int(number) } => state.push_int(*number),
             InstrKind::Push { .. } => todo!(),
 
             InstrKind::Call { to } => todo!(),
             InstrKind::Return => return Ok(()),
 
-            InstrKind::Drop => {
-                state.stack.pop_int(&mut state.memory);
-            },
+            InstrKind::Drop => drop(state.pop_int()),
             InstrKind::Dup  => todo!(),
             InstrKind::Over => todo!(),
             InstrKind::Swap => todo!(),
@@ -74,8 +73,8 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
             InstrKind::Arrow => todo!(),
 
             InstrKind::Add => {
-                let lhs = state.stack.pop_int(&mut state.memory);
-                let rhs = state.stack.pop_int(&mut state.memory);
+                let lhs = state.pop_int();
+                let rhs = state.pop_int();
                 println!("{lhs} + {rhs} = {}", lhs + rhs);
             },
             InstrKind::Sub => todo!(),
@@ -106,18 +105,43 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
 
 }
 
-struct State {
-    pub arena: StrArena,
-    pub memory: Memory,
-    pub stack: Stack,
+struct State<'a> {
+    common: CommonState<'a>,
 }
 
-/// representation of the stack, that enables safely
-/// accessing everything as raw bytes etc.
-/// needs to be created with a [`Memory`]
-pub(crate) struct Stack {
-    pub id: MemoryId,
-    pub pos: usize,
+impl<'a> State<'a> {
+    pub fn push_int(&mut self, value: usize) {
+        self.common.push_int(value)
+    }
+    pub fn pop_int(&mut self) -> usize {
+        self.common.pop_int()
+    }
+}
+
+pub(crate) struct CommonState<'a> {
+    pub arena: &'a StrArena,
+    pub memory: Memory,
+    pub stack: MemoryPtr,
+}
+
+impl<'a> CommonState<'a> {
+
+    // todo: type information has to be encoded into the intrinsics
+    #[track_caller]
+    pub fn push_int(&mut self, value: usize) {
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        slice[..8].copy_from_slice(&usize::to_ne_bytes(value));
+        self.stack.add_offset(8);
+    }
+
+    #[track_caller]
+    pub fn pop_int(&mut self) -> usize {
+        self.stack.add_offset(-8);
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        let result = usize::from_ne_bytes(slice[..8].try_into().expect("int conversion"));
+        result
+    }
+
 }
 
 // pub(crate) struct TypeMetadata {
@@ -129,33 +153,12 @@ pub(crate) struct Stack {
 // todo: Pointers have to be stored with the same 64 bit size as the compiled version,
 //       so a pointer is like (u32: MemoryId, u32: Index)
 
-impl Stack {
-
-    pub fn new(id: MemoryId) -> Self {
-        Self { id, pos: 0 }
-    }
-
-    // todo: type information has to be encoded into the intrinsics
-    pub fn push_int(&mut self, memory: &mut Memory, value: usize) {
-        let slice = memory.access_mut(self.id).expect("access stack memory");
-        slice[self.pos .. self.pos + 8].copy_from_slice(&usize::to_ne_bytes(value));
-        self.pos += 8;
-    }
-
-    pub fn pop_int(&mut self, memory: &mut Memory) -> usize {
-        let slice = memory.access_mut(self.id).expect("access stack memory");
-        let result = usize::from_ne_bytes(slice[self.pos - 8 .. self.pos].try_into().expect("int conversion"));
-        self.pos -= 8;
-        result
-    }
-
-}
-
 /// provides safe allocation for the VM
 /// uses the global allocator to allocate objects
 pub(crate) struct Memory {
-    objects: HashMap<MemoryId, MemoryMetadata>,
+    objects: HashMap<u32, MemoryMetadata>,
     current_id: u32,
+    // todo: add a field "last_valid" that caches the last accessed still valid MemoryPtr so we dont have to do a hashmap lookup every time
 }
 
 impl Memory {
@@ -167,62 +170,42 @@ impl Memory {
         }
     }
 
-    pub fn alloc(&mut self, size: usize, align: usize) -> Result<MemoryId, MemoryError> {
+    pub fn alloc(&mut self, size: usize, align: usize) -> Result<MemoryPtr, MemoryError> {
         self.current_id += 1;
-        if size == 0 || align == 0 { return Err(MemoryError::InvalidLayout) };
+        if size == 0 { return Err(MemoryError::InvalidLayout) };
         let layout = alloc::Layout::from_size_align(size, align).map_err(|_| MemoryError::InvalidLayout)?;
         // SAFETY: layout is valid
         let ptr = unsafe { alloc::alloc(layout) };
         if ptr.is_null() { alloc::handle_alloc_error(layout) };
-        let id = MemoryId::new(self.current_id);
-        self.objects.insert(id, MemoryMetadata { layout, ptr, size, initialized: false });
-        Ok(id)
+        let mp = MemoryPtr::new(self.current_id);
+        self.objects.insert(mp.id, MemoryMetadata { layout, ptr, size, initialized: false });
+        Ok(mp)
     }
 
-    // pub fn alloc_t<T>(&mut self) -> Result<MemoryId, MemoryError> {
-    //     let layout = alloc::Layout::new::<T>();
-    //     self.alloc(layout.size(), layout.align())
-    // }
-
-    pub fn dealloc(&mut self, id: MemoryId) -> Result<(), MemoryError> {
-        let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
+    pub fn dealloc(&mut self, mp: MemoryPtr) -> Result<(), MemoryError> {
+        let metadata = self.objects.get(&mp.id).ok_or(MemoryError::InvalidAccess)?;
         // SAFETY: if we found the layout the ptr will be valid
         unsafe { alloc::dealloc(metadata.ptr, metadata.layout) };
-        self.objects.remove(&id);
+        self.objects.remove(&mp.id);
         Ok(())
     }
 
-    pub fn access<'a>(&'a self, id: MemoryId) -> Result<&'a [u8], MemoryError> {
-        let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
+    // todo: make write and read methods to enable checking if memory was initialized before reading
+    pub fn access<'a>(&'a self, mp: MemoryPtr) -> Result<&'a [u8], MemoryError> {
+        let metadata = self.objects.get(&mp.id).ok_or(MemoryError::InvalidAccess)?;
         if !metadata.initialized { return Err(MemoryError::Uninitialized) };
         // SAFETY: if we found the layout the ptr will be valid
-        Ok(unsafe { slice::from_raw_parts(metadata.ptr, metadata.size) })
+        let slice = unsafe { slice::from_raw_parts(metadata.ptr, metadata.size) };
+        slice.get(mp.offset as usize..).ok_or(MemoryError::InvalidAccess)
     }
 
-    pub fn access_mut<'a>(&'a mut self, id: MemoryId) -> Result<&'a mut [u8], MemoryError> {
-        let metadata = self.objects.get_mut(&id).ok_or(MemoryError::InvalidId)?;
+    pub fn access_mut<'a>(&'a mut self, mp: MemoryPtr) -> Result<&'a mut [u8], MemoryError> {
+        let metadata = self.objects.get_mut(&mp.id).ok_or(MemoryError::InvalidAccess)?;
         metadata.initialized = true;
         // SAFETY: if we found the layout the ptr will be valid and we borrow self mutably
-        Ok(unsafe { slice::from_raw_parts_mut(metadata.ptr, metadata.size) })
+        let slice = unsafe { slice::from_raw_parts_mut(metadata.ptr, metadata.size) };
+        slice.get_mut(mp.offset as usize..).ok_or(MemoryError::InvalidAccess)
     }
-
-    // pub fn access_t<'a, T>(&'a self, id: MemoryId) -> Result<&'a T, MemoryError> {
-    //     let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
-    //     // IMPORTANT: don't remove these assertions as they are safety checks
-    //     // todo: check for align
-    //     assert!(metadata.size == mem::size_of::<T>(), "size of T has to match the size of the allocation");
-    //     assert!(metadata.initialized, "trying to access uninitialized data");
-    //     unsafe { Ok(&*(self.access(id)?.as_ptr() as *const T)) }
-    // }
-
-
-    // pub fn access_t_mut<'a, T>(&'a mut self, id: MemoryId) -> Result<&'a mut mem::MaybeUninit<T>, MemoryError> {
-    //     let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
-    //     // IMPORTANT: don't remove these assertions as they are safety checks
-    //     // todo: check for align
-    //     assert!(metadata.size == mem::size_of::<T>(), "size of T has to match the size of the allocation");
-    //     unsafe { Ok(&mut *(self.access_mut(id)?.as_mut_ptr() as *mut mem::MaybeUninit<T>)) }
-    // }
 
     pub fn allocations(&self) -> usize {
         self.objects.len()
@@ -230,14 +213,26 @@ impl Memory {
 
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct MemoryId {
-    id: u32,
+#[derive(Clone, Copy)]
+pub(crate) struct MemoryPtr {
+    pub id: u32,
+    pub offset: u32,
 }
 
-impl MemoryId {
-    fn new(id: u32) -> Self {
-        Self { id }
+impl MemoryPtr {
+    pub fn new(id: u32) -> Self {
+        Self { id, offset: 0 }
+    }
+    pub fn whole(mut self) -> Self {
+        self.offset = 0;
+        self
+    }
+    pub fn add_offset(&mut self, offset: isize) {
+        self.offset = (self.offset as isize + offset) as u32;
+    }
+    pub fn with_offset(mut self, offset: isize) -> Self {
+        self.offset = (self.offset as isize + offset) as u32;
+        self
     }
 }
 
@@ -251,7 +246,7 @@ pub(crate) struct MemoryMetadata {
 #[derive(Debug)]
 pub(crate) enum MemoryError {
     InvalidLayout,
-    InvalidId,
+    InvalidAccess,
     Uninitialized,
 }
 
