@@ -78,7 +78,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
                 state.bytecode.push(Instr::spanned(result, op.span));
             },
 
-            OpKind::Copy  => state.bytecode.push(Instr::spanned(InstrKind::Copy, op.span)),
+            OpKind::Dup  => state.bytecode.push(Instr::spanned(InstrKind::Dup, op.span)),
             OpKind::Over  => state.bytecode.push(Instr::spanned(InstrKind::Over, op.span)),
             OpKind::Swap  => state.bytecode.push(Instr::spanned(InstrKind::Swap, op.span)),
             OpKind::Rot3  => state.bytecode.push(Instr::spanned(InstrKind::Rot3, op.span)),
@@ -210,7 +210,7 @@ pub(crate) enum InstrKind<I> {
     Return,
 
     Drop,
-    Copy,
+    Dup,
     Over,
     Swap,
     Rot3,

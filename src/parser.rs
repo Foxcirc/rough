@@ -17,9 +17,9 @@ pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, Fi
 
 fn ignore_extra<'a, 'b>(val: ParseError<'a, 'b>) -> FinalParseError<'a> {
     VerboseError { errors: val.errors.into_iter().map(|(dat, kind)| (
-            unsafe { LocatedSpan::new_from_raw_offset(dat.location_offset(), dat.location_line(), dat.into_fragment(), ()) },
-            kind
-        )).collect() }
+        unsafe { LocatedSpan::new_from_raw_offset(dat.location_offset(), dat.location_line(), dat.into_fragment(), ()) },
+        kind
+    )).collect() }
 }
 
 pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, TranslationUnit<ParsedItems>> {
@@ -119,7 +119,7 @@ pub(crate) fn parse_op<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, O
     map(
         alt((
             alt((
-                value(OpKind::Copy,   char('*')),
+                value(OpKind::Dup,   char('*')),
                 value(OpKind::Drop,   char('~')),
                 value(OpKind::Over,   char('+')),
                 value(OpKind::Swap,   char('-')),
@@ -181,6 +181,9 @@ pub(crate) fn parse_op<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, O
 }
 
 pub(crate) fn parse_integer<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, usize> {
+
+    // IMPORTANT: this is very fragile, changing the combinators used will also result in a need to
+    //            change big the errors handling code below
 
     use nom::{Err as NomErr, error::ErrorKind};
 
@@ -259,6 +262,8 @@ pub(crate) type FinalParseError<'a> = VerboseError<LocatedSpan<&'a str>>;
 pub(crate) fn format_error(value: FinalParseError) -> diagnostic::Diagnostic {
 
     let mut diag = diagnostic::Diagnostic::error("invalid source file");
+
+    // todo: implement this again
 
 //    if let Some((span, _)) = value.errors.first() {
 //        let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
@@ -379,7 +384,7 @@ pub(crate) enum OpKind {
 
     Call { name: Identifier },
 
-    Copy,
+    Dup,
     Over,
     Swap,
     Rot3,

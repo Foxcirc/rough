@@ -150,7 +150,7 @@ fn main() {
 
 fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static, I>>, path: path::PathBuf) -> future::Boxed<Result<Arc<TranslationUnit<Program<I>>>, ()>> {
 
-    async move {
+    async move { // todo: can we move this async boxing to the place where we spawn the inner task?
 
         let module_name = path.to_string_lossy().to_string();
 

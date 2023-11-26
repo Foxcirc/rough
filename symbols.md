@@ -23,7 +23,6 @@ This is the rough specification for now.
 
 # Brackets
 
-- `<>` ???
 - `()` inline tuple
 - `{}` code block
 - `[]` attribute
@@ -150,9 +149,10 @@ The type of string literals is `str` but they do not allocate using the `allocat
 
 - `box` a unique pointer (allocates)
 - `rc` a reference counted shared pointer (allocates)
-- `chk` enables compile time borrow checking
+- `chk`, `const-ptr`, `mut-ptr` enables compile time borrow checking
 - `list` a sequencial list (allocates)
 - `linked-list` a linked list (allocates)
+- `map` a hashmap (allocates)
 
 # Notes
 

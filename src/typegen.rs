@@ -41,7 +41,7 @@ fn typecheck_fun<I: Intrinsic>(state: &mut State<I>, fun: FunWithMetadata<I>) ->
             InstrKind::Return => todo!(),
 
             InstrKind::Drop => todo!(),
-            InstrKind::Copy => todo!(),
+            InstrKind::Dup => todo!(),
             InstrKind::Over => todo!(),
             InstrKind::Swap => todo!(),
             InstrKind::Rot3 => todo!(),
