@@ -1,5 +1,5 @@
 
-use std::{alloc, collections::HashMap};
+use std::{alloc, collections::HashMap, slice};
 use crate::{
     basegen::{Program, FunWithMetadata, InstrKind},
     diagnostic::Diagnostic,
@@ -7,10 +7,6 @@ use crate::{
     arch::Intrinsic,
     arena::StrArena
 };
-
-// pub(crate) struct Eval<Impl> {
-// 
-// }
 
 pub(crate) fn eval<I: Intrinsic>(input: TranslationUnit<Program<I>>) -> Result<(), EvalError> {
 
@@ -118,6 +114,7 @@ impl Memory {
         let ptr = unsafe { alloc::alloc(layout) };
         if ptr.is_null() { alloc::handle_alloc_error(layout) };
         let id = MemoryId::new(ptr as usize);
+        self.objects.insert(id, MemoryMetadata { layout, ptr, size });
         Ok(id)
     }
 
@@ -129,10 +126,10 @@ impl Memory {
         Ok(())
     }
 
-    pub fn access<'a>(&'a self, id: MemoryId) -> Result<&'a mut u8, MemoryError> {
+    pub fn access<'a>(&'a self, id: MemoryId) -> Result<&'a mut [u8], MemoryError> {
         let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
         // SAFETY: if we found the layout the ptr will be valid
-        Ok(unsafe { &mut *metadata.ptr })
+        Ok(unsafe { slice::from_raw_parts_mut(metadata.ptr, metadata.size) })
     }
 
 }
@@ -151,13 +148,16 @@ impl MemoryId {
 pub(crate) struct MemoryMetadata {
     layout: alloc::Layout,
     ptr: *mut u8,
+    size: usize,
 }
 
+#[derive(Debug)]
 pub(crate) enum MemoryError {
     InvalidLayout,
     InvalidId,
 }
 
+// todo: impl debug and Error for all errors, so they can be used as actuall error types (eg .unwrap works only for Debug types)
 pub(crate) struct EvalError {
     kind: EvalErrorKind,
     span: Span,
