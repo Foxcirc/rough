@@ -4,7 +4,6 @@ pub(crate) mod test;
 
 pub mod diagnostic;
 pub mod arena;
-pub mod util;
 pub mod parser;
 pub mod basegen;
 pub mod typegen;
@@ -18,6 +17,8 @@ use futures_lite::{future, FutureExt};
 use parser::TranslationUnit;
 
 fn main() {
+
+    // todo: set alloc-error-hook
     
     let opts = match cli::parse(env::args()) {
         Err(err) => {
@@ -254,16 +255,17 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             }
         };
 
-        // wait for all the dependencies to be built
-        let results = util::join_all(futs).await;
-        let mut deps = Vec::with_capacity(results.len());
-        for result in results {
-            deps.push(result?);
+        // wait for all the dependencies to be built.
+        // we don't need to `join_all` here, because the executor will
+        // run all the tasks we spawned earlier automatically
+        let mut deps = Vec::with_capacity(futs.len());
+        for fut in futs {
+            deps.push(fut.await?);
         }
 
         drop(deps); // <- do something with the dependencies
 
-        // now we generate the final, typechecked program code
+        // now we generate the final, typechecked program code.
         // for this we need the dependencies
         let program = match typegen::typegen(base_program) {
             Ok(val) => val,

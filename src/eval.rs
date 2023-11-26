@@ -1,5 +1,12 @@
 
-use crate::{basegen::{Program, FunWithMetadata, InstrKind}, diagnostic::Diagnostic, parser::{Span, TranslationUnit}, arch::Intrinsic, arena::StrArena};
+use std::{alloc, collections::HashMap};
+use crate::{
+    basegen::{Program, FunWithMetadata, InstrKind},
+    diagnostic::Diagnostic,
+    parser::{Span, TranslationUnit},
+    arch::Intrinsic,
+    arena::StrArena
+};
 
 // pub(crate) struct Eval<Impl> {
 // 
@@ -90,6 +97,65 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
 struct State {
     pub arena: StrArena,
     pub memory: Vec<u8>,
+}
+
+/// provides safe allocation for the VM
+/// uses the global allocator to allocate objects
+pub(crate) struct Memory {
+    objects: HashMap<MemoryId, MemoryMetadata>,
+}
+
+impl Memory {
+
+    pub fn new() -> Self {
+        Self { objects: HashMap::new() }
+    }
+
+    pub fn alloc(&mut self, size: usize, align: usize) -> Result<MemoryId, MemoryError> {
+        if size == 0 || align == 0 { return Err(MemoryError::InvalidLayout) };
+        let layout = alloc::Layout::from_size_align(size, align).map_err(|_| MemoryError::InvalidLayout)?;
+        // SAFETY: layout is valid
+        let ptr = unsafe { alloc::alloc(layout) };
+        if ptr.is_null() { alloc::handle_alloc_error(layout) };
+        let id = MemoryId::new(ptr as usize);
+        Ok(id)
+    }
+
+    pub fn dealloc(&mut self, id: MemoryId) -> Result<(), MemoryError> {
+        let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
+        // SAFETY: if we found the layout the ptr will be valid
+        unsafe { alloc::dealloc(metadata.ptr, metadata.layout) };
+        self.objects.remove(&id);
+        Ok(())
+    }
+
+    pub fn access<'a>(&'a self, id: MemoryId) -> Result<&'a mut u8, MemoryError> {
+        let metadata = self.objects.get(&id).ok_or(MemoryError::InvalidId)?;
+        // SAFETY: if we found the layout the ptr will be valid
+        Ok(unsafe { &mut *metadata.ptr })
+    }
+
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MemoryId {
+    id: usize,
+}
+
+impl MemoryId {
+    fn new(id: usize) -> Self {
+        Self { id }
+    }
+}
+
+pub(crate) struct MemoryMetadata {
+    layout: alloc::Layout,
+    ptr: *mut u8,
+}
+
+pub(crate) enum MemoryError {
+    InvalidLayout,
+    InvalidId,
 }
 
 pub(crate) struct EvalError {
