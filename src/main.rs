@@ -338,9 +338,9 @@ impl Waiter {
 
 pub(crate) mod arch {
 
-    use crate::{parser::Type, typegen};
+    use crate::typegen;
 
-    pub(crate) trait Intrinsic: Clone + PartialEq + Eq {
+    pub(crate) trait Intrinsic: Clone + PartialEq + Eq { // todo: remove clone bound
         fn basegen(name: &str) -> Option<Self> where Self: Sized;
         fn typegen(&self, state: &mut typegen::State);
     }

@@ -59,10 +59,10 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             OpKind::Nop => (),
             OpKind::Push { value: Literal::Tuple(tuple) } => {
                 // generate instructions for this tuple
-                let mut inner_state = State { bytecode: Vec::new(), counter: state.counter, arena: state.arena };
-                codegen_block(&mut inner_state, tuple, None)?;
-                let value = InstrLiteral::Tuple(inner_state.bytecode);
-                state.bytecode.push(Instr::spanned(InstrKind::Push { value }, op.span))
+                // let mut inner_state = State { bytecode: Vec::new(), counter: state.counter, arena: state.arena };
+                // codegen_block(&mut inner_state, tuple, None)?;
+                // todo: push the things onto the stack and then create a tuple:new-n
+                todo!("impl tuple literal");
             },
             OpKind::Push { value: parsed } => {
                 let value = InstrLiteral::from_literal(parsed);
@@ -163,14 +163,13 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum InstrLiteral<I> {
+pub(crate) enum InstrLiteral {
     Int(usize),
     Bool(bool),
     Str(String),
-    Tuple(Vec<Instr<I>>),
 }
 
-impl<I> InstrLiteral<I> {
+impl InstrLiteral {
     pub fn from_literal(parsed: Literal) -> Self {
         match parsed {
             Literal::Int(val)  => Self::Int(val),
@@ -204,7 +203,7 @@ pub(crate) enum InstrKind<I> {
 
     Label { label: Label, producer: Producer }, // todo: rename?
 
-    Push { value: InstrLiteral<I> },
+    Push { value: InstrLiteral },
 
     Call { to: Identifier },
     Return,

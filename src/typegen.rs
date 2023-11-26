@@ -82,7 +82,12 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
             InstrKind::Arrow => todo!(),
 
-            InstrKind::Add => todo!(),
+            InstrKind::Add => {
+                let mut borrow = state.borrow_mut();
+                let lhs = borrow.pop_int();
+                let rhs = borrow.pop_int();
+
+            },
             InstrKind::Sub => todo!(),
             InstrKind::Mul => todo!(),
             InstrKind::Dvm => todo!(),
@@ -119,24 +124,49 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 // very similar to the state in eval
 pub(crate) struct State<'a> {
     common: CommonState<'a>,
-    pub types: Vec<Item>,
+    pub types: Vec<StackItem>,
 }
 
 impl<'a> State<'a> {
 
     pub fn push_int(&mut self, value: usize) {
-        self.types.push(Item { comptime: true, t: Type::Int });
+        self.types.push(StackItem { comptime: true, t: Type::Int });
         self.common.push_int(value)
     }
 
-    pub fn pop_int(&mut self) -> usize {
-        assert!(matches!(self.types.pop(), Some(Item { t: Type::Int, .. })));
-        self.common.pop_int()
+    pub fn pop_int(&mut self) -> Result<RocItem, TypeError> {
+        match self.types.pop() {
+            Some(item) if item.comptime => {
+                if item.t != Type::Int {
+                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: Type::Int, got: Some(item.t) }));
+                }
+                let number = self.common.pop_int();
+                Ok(RocItem::Comptime(InstrLiteral::Int(number)))
+            },
+            Some(item) => {
+                Ok(RocItem::Runtime(item.t))
+            },
+            None => {
+                Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: Type::Int, got: None }))
+            }
+        }
     }
 
 }
 
-pub(crate) struct Item {
+/// *r*untime *o*r *c*omptime item
+pub(crate) enum RocItem {
+    Comptime(InstrLiteral),
+    Runtime(Type)
+}
+
+impl RocItem {
+    pub fn is_comptime(&self) -> bool {
+        matches!(self, RocItem::Comptime(..))
+    }
+}
+
+pub(crate) struct StackItem {
     comptime: bool,
     t: Type,
 }
@@ -150,13 +180,16 @@ impl TypeError {
     pub(crate) fn spanned(kind: TypeErrorKind, span: Span) -> Self {
         Self { kind, span }
     }
+    pub(crate) fn unspanned(kind: TypeErrorKind) -> Self {
+        Self { kind, span: Span::default() }
+    }
 }
 
 pub(crate) enum TypeErrorKind {
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Mismatch { want: Vec<()>, got: Vec<()> },
+    Mismatch { want: Type, got: Option<Type> },
     Error,
 }
 
