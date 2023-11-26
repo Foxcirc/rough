@@ -58,7 +58,7 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
             InstrKind::Label { label, producer } => todo!(),
 
             InstrKind::Push { value: InstrLiteral::Int(number) } => {
-                state.borrow_mut().common.push_int(number)
+                state.borrow_mut().push_int(number)
             },
             InstrKind::Push { .. } => todo!(),
 
@@ -115,17 +115,19 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
 // very similar to the state in eval
 struct State<'a> {
-    pub common: CommonState<'a>,
+    common: CommonState<'a>,
     pub types: Vec<Item>,
 }
 
 impl<'a> State<'a> {
 
     pub fn push_int(&mut self, value: usize) {
+        self.types.push(Item { comptime: true, t: Type::Int });
         self.common.push_int(value)
     }
 
     pub fn pop_int(&mut self) -> usize {
+        assert!(matches!(self.types.pop(), Some(Item { t: Type::Int, .. })));
         self.common.pop_int()
     }
 
