@@ -11,7 +11,7 @@ This is the rough specification for now.
 - `<`  ptr-write
 - `//` one line comment
 - `/*` inline comment
-- `#`  ???
+- `#`  argument swap
 - `$`  formatting
 - `%`  ???
 - `&`  addr-of
@@ -153,6 +153,7 @@ The type of string literals is `str` but they do not allocate using the `allocat
 - `list` a sequencial list (allocates)
 - `linked-list` a linked list (allocates)
 - `map` a hashmap (allocates)
+- `range` an exclusive range (eg. 0..12)
 
 # Notes
 

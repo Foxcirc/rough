@@ -41,7 +41,7 @@ fn main() {
         Ok(opts) => opts,
     };
 
-    let (working_dir, input_file) = match split_path_unwrap(opts.input.clone()) {
+    let (working_dir, input_file) = match split_path(opts.input.clone()) {
         Some(val) => val,
         None => {
             Diagnostic::error("invalid (or no) input file provided").emit();
@@ -298,7 +298,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
 }
 
-fn split_path_unwrap(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
+fn split_path(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
     Some((path.parent()?.to_path_buf(), path.file_name()?.to_os_string()))
 }
 

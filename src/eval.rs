@@ -1,5 +1,5 @@
 
-use std::{alloc, collections::HashMap, slice, mem};
+use std::{alloc, collections::HashMap, slice};
 use crate::{
     basegen::{Program, FunWithMetadata, InstrKind, InstrLiteral},
     diagnostic::Diagnostic,
@@ -75,6 +75,7 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
             InstrKind::Add => {
                 let lhs = state.pop_int();
                 let rhs = state.pop_int();
+                let t = state.pop(8);
                 println!("{lhs} + {rhs} = {}", lhs + rhs);
             },
             InstrKind::Sub => todo!(),
@@ -110,6 +111,12 @@ struct State<'a> {
 }
 
 impl<'a> State<'a> {
+    pub fn push(&mut self, value: Vec<u8>) {
+        self.common.push(value)
+    }
+    pub fn pop(&mut self, size: usize) -> Vec<u8> {
+        self.common.pop(size)
+    }
     pub fn push_int(&mut self, value: usize) {
         self.common.push_int(value)
     }
@@ -126,6 +133,13 @@ pub(crate) struct CommonState<'a> {
 
 impl<'a> CommonState<'a> {
 
+    #[track_caller]
+    pub fn push(&mut self, data: Vec<u8>) {
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        slice[..data.len()].copy_from_slice(&data);
+        self.stack.add_offset(data.len() as isize);
+    }
+
     // todo: type information has to be encoded into the intrinsics
     #[track_caller]
     pub fn push_int(&mut self, value: usize) {
@@ -135,10 +149,19 @@ impl<'a> CommonState<'a> {
     }
 
     #[track_caller]
+    pub fn pop(&mut self, size: usize) -> Vec<u8> {
+        self.stack.add_offset(- (size as isize));
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        Vec::from(&slice[..size])
+    }
+
+    #[track_caller]
     pub fn pop_int(&mut self) -> usize {
         self.stack.add_offset(-8);
         let slice = self.memory.access_mut(self.stack).expect("access stack memory");
-        let result = usize::from_ne_bytes(slice[..8].try_into().expect("int conversion"));
+        let result = usize::from_ne_bytes(
+            slice[..8].try_into().unwrap()
+        );
         result
     }
 

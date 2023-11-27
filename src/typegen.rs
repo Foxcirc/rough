@@ -84,9 +84,12 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
             InstrKind::Add => {
                 let mut borrow = state.borrow_mut();
-                let lhs = borrow.pop_int();
-                let rhs = borrow.pop_int();
-
+                let lhs = check(borrow.pop(), Type::Int)?;
+                let rhs = check(borrow.pop(), Type::Int)?;
+                let result = match comptime([lhs, rhs]) {
+                    Some(value) => run(value, Calc::add),
+                    None => borrow.push(Item::runtime(Type::Int))
+                };
             },
             InstrKind::Sub => todo!(),
             InstrKind::Mul => todo!(),
@@ -124,49 +127,72 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 // very similar to the state in eval
 pub(crate) struct State<'a> {
     common: CommonState<'a>,
-    pub types: Vec<StackItem>,
+    pub types: Vec<Metadata>,
 }
 
 impl<'a> State<'a> {
 
-    pub fn push_int(&mut self, value: usize) {
-        self.types.push(StackItem { comptime: true, t: Type::Int });
-        self.common.push_int(value)
+    pub fn push(&mut self, item: Item<Option<Vec<u8>>>) {
+        let size = 8; // todo: use actual size of t
+        self.types.push(item.metadata);
+        self.common.push(item.data.unwrap_or(vec![0; size]));
     }
 
-    pub fn pop_int(&mut self) -> Result<RocItem, TypeError> {
-        match self.types.pop() {
-            Some(item) if item.comptime => {
-                if item.t != Type::Int {
-                    return Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: Type::Int, got: Some(item.t) }));
-                }
-                let number = self.common.pop_int();
-                Ok(RocItem::Comptime(InstrLiteral::Int(number)))
-            },
-            Some(item) => {
-                Ok(RocItem::Runtime(item.t))
-            },
-            None => {
-                Err(TypeError::unspanned(TypeErrorKind::Mismatch { want: Type::Int, got: None }))
+    pub fn push_int(&mut self, value: usize) {
+        self.push(Item {
+            metadata: Metadata { comptime: true, t: Type::Int },
+            data: Some(Vec::from(value.to_ne_bytes()))
+        })
+    }
+
+    /// Peek at the top most stack item
+    pub fn peek(&self) -> Option<&Metadata> {
+        self.types.last()
+    }
+
+    pub fn pop(&mut self) -> Option<Item<Option<Vec<u8>>>> {
+        // if the item is not comptime it will be `None`
+        let metadata = self.types.pop()?;
+        let data = self.common.pop(/* todo: use the actual size of the type */ 8);
+        match metadata.comptime {
+            true => Some(Item { metadata, data: Some(data) }),
+            false => Some(Item { metadata, data: None })
+        }
+        
+    }
+
+    pub fn pop_int(&mut self) -> Item<Option<usize>> {
+        // if the item is not comptime it will be `None`
+        let item = self.pop().expect("pop item");
+        assert!(item.metadata.t == Type::Int, "type must be integer");
+        item.map(|data| usize::from_ne_bytes(data[..].try_into().unwrap()))
+    }
+
+}
+
+pub(crate) struct Item<T> {
+    pub metadata: Metadata,
+    data: T, // use tinyvec / stackvec
+}
+
+impl<T> Item<Option<T>> {
+    pub fn runtime(t: Type) -> Self {
+        Self { metadata: Metadata { comptime: false, t }, data: None }
+    }
+    /// Maps the items data if it is `Some`
+    pub fn map<U>(self, func: impl FnOnce(T) -> U) -> Item<Option<U>> {
+        Item {
+            metadata: self.metadata,
+            data: if let Some(data) = self.data {
+                Some(func(data))
+            } else {
+                None
             }
         }
     }
-
 }
 
-/// *r*untime *o*r *c*omptime item
-pub(crate) enum RocItem {
-    Comptime(InstrLiteral),
-    Runtime(Type)
-}
-
-impl RocItem {
-    pub fn is_comptime(&self) -> bool {
-        matches!(self, RocItem::Comptime(..))
-    }
-}
-
-pub(crate) struct StackItem {
+pub(crate) struct Metadata {
     comptime: bool,
     t: Type,
 }
@@ -190,7 +216,6 @@ pub(crate) enum TypeErrorKind {
     BranchesNotEmpty,
     BranchesNotEqual,
     Mismatch { want: Type, got: Option<Type> },
-    Error,
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
@@ -206,11 +231,13 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
                 .note("both branches have to evaluate to the same types")
         },
         TypeErrorKind::Mismatch { want, got } => {
-            Diagnostic::error("type mismatch")
-                .note(format!("want {:?}", want.into_iter().map(|val| val).collect::<Vec<_>>()))
-                .note(format!("got {:?}", got .into_iter().map(|val| val).collect::<Vec<_>>()))
+            let diag = Diagnostic::error("type mismatch")
+                .note(format!("want {:?}", want));
+                match got {
+                    Some(t) => diag.note(format!("got {:?}", t)),
+                    None    => diag.note(format!("got <empty>"))
+                }
         },
-        TypeErrorKind::Error => Diagnostic::error("TODO: IMPLEMENT TYPE ERROR")
     };
     diag
 }
