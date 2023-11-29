@@ -1,7 +1,6 @@
 
-use std::{alloc, collections::HashMap, slice};
-
-use crate::{arena, typegen::Item};
+use std::{alloc, mem, ptr, collections::HashMap, slice};
+use crate::arena;
 
 // todo: Pointers have to be stored with the same 64 bit size as the compiled version,
 //       so a pointer is like (u32: MemoryId, u32: Index)
@@ -120,29 +119,132 @@ impl<'a> CommonState<'a> {
         self.stack.add_offset(data.len() as isize);
     }
 
-    // todo: type information has to be encoded into the intrinsics
     #[track_caller]
-    pub fn push_int(&mut self, value: usize) {
-        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
-        slice[..8].copy_from_slice(&usize::to_ne_bytes(value));
-        self.stack.add_offset(8);
-    }
-
-    #[track_caller]
-    pub fn pop(&mut self, size: usize) -> Vec<u8> {
+    pub fn pop(&mut self, size: usize) -> Vec<u8> { // todo: use StackVec
         self.stack.add_offset(- (size as isize));
         let slice = self.memory.access_mut(self.stack).expect("access stack memory");
         Vec::from(&slice[..size])
     }
 
     #[track_caller]
-    pub fn pop_int(&mut self) -> usize {
-        self.stack.add_offset(-8);
+    pub fn dup(&mut self, size: usize) {
+
+        self.stack.add_offset(- (size as isize));
+
         let slice = self.memory.access_mut(self.stack).expect("access stack memory");
-        let result = usize::from_ne_bytes(
-            slice[..8].try_into().unwrap()
-        );
-        result
+        let (item, rest) = slice.split_at_mut(size);
+
+        rest[..size].copy_from_slice(item);
+
+        self.stack.add_offset(size as isize * 2);
+
+    }
+
+    /// size1 is the topmost element, size2 is the element that will be duped
+    #[track_caller]
+    pub fn over(&mut self, size1: usize, size2: usize) {
+
+        self.stack.add_offset(- ((size1 + size2) as isize));
+
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        let (items, rest) = slice.split_at_mut(size1 + size2);
+
+        rest[..size2].copy_from_slice(&items[..size2]);
+
+        self.stack.add_offset((size1 + size2 * 2) as isize);
+
+    }
+
+    /// size1 is the topmost element
+    #[track_caller]
+    pub fn swap(&mut self, size1: usize, size2: usize) {
+
+        // optimized implemntation if the elements have the same size
+        // otherwise a naive implementation
+        if size1 == size2 {
+
+            self.stack.add_offset(- (size1 as isize * 2));
+
+            let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+            let (one, rest) = slice.split_at_mut(size1);
+            let two = &mut rest[..size1];
+
+            one.swap_with_slice(two);
+
+            self.stack.add_offset(size1 as isize * 2);
+
+        } else {
+
+            let one = self.pop(size1);
+            let two = self.pop(size2);
+            self.push(one);
+            self.push(two);
+
+        }
+
+    }
+
+    /// size1 is the topmost element
+    #[track_caller]
+    pub fn rot3(&mut self, size1: usize, size2: usize, size3: usize) {
+
+        // optimized implemntation if the elements have the same size
+        // otherwise a naive implementation
+        if size1 == size2 && size1 == size3 {
+
+            self.stack.add_offset(- (size1 as isize * 3));
+
+            let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+
+            let items = &mut slice[..size1 * 3];
+            items.rotate_left(size1);
+
+            self.stack.add_offset(size1 as isize * 3);
+
+        } else {
+
+            let one = self.pop(size1);
+            let two = self.pop(size2);
+            let three = self.pop(size3);
+            self.push(one);
+            self.push(three);
+            self.push(two);
+
+        }
+
+    }
+
+    /// size1 is the topmost element
+    // A B C D => D A B C
+    #[track_caller]
+    pub fn rot4(&mut self, size1: usize, size2: usize, size3: usize, size4: usize) {
+
+        // optimized implemntation if the elements have the same size
+        // otherwise a naive implementation
+        if size1 == size2 && size1 == size3 && size1 == size4 {
+
+            self.stack.add_offset(- (size1 as isize * 4));
+
+            let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+
+            let items = &mut slice[..size1 * 4];
+            items.rotate_left(size1);
+
+            self.stack.add_offset(size1 as isize * 4);
+
+        } else {
+
+            let one = self.pop(size1);
+            let two = self.pop(size2);
+            let three = self.pop(size3);
+            let four = self.pop(size4);
+            self.push(one);
+            self.push(four);
+            self.push(three);
+            self.push(two);
+
+        }
+
     }
 
 }

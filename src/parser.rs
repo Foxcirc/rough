@@ -345,8 +345,8 @@ pub(crate) struct TypeDef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
-    // special type used for typechecking
-    // Any,
+    // special type used for typechecking, not to the same as `any` inside signatures
+    Any,
     // standard types
     Int,
     Bool,

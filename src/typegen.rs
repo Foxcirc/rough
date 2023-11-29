@@ -55,20 +55,19 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
         match instr.kind {
 
-            InstrKind::Label { label, producer } => todo!(),
+            InstrKind::Label { .. } => (),
 
-            InstrKind::Push { value: InstrLiteral::Int(number) } => state.borrow_mut().push_int(number),
-            InstrKind::Push { .. } => todo!(),
+            InstrKind::Push { value } => state.borrow_mut().push(Item::literal(value)),
 
             InstrKind::Call { to } => todo!(),
             InstrKind::Return => return Ok(()),
 
-            InstrKind::Drop => drop(state.borrow_mut().pop()),
-            InstrKind::Dup  => order(state.borrow_mut(), |[lhs]| Ok([lhs.clone(), lhs.clone()]))?,
-            InstrKind::Over => order(state.borrow_mut(), |[lhs, rhs]| Ok([lhs.clone(), rhs, lhs.clone()]))?,
-            InstrKind::Swap => order(state.borrow_mut(), |[lhs, rhs]| Ok([lhs, rhs]))?,
-            InstrKind::Rot3 => order(state.borrow_mut(), |[a, b, c]| Ok([b, c, a]))?,
-            InstrKind::Rot4 => order(state.borrow_mut(), |[a, b, c, d]| Ok([b, c, d, a]))?,
+            InstrKind::Drop => state.borrow_mut().drop()?,
+            InstrKind::Dup  => state.borrow_mut().dup()?,
+            InstrKind::Over => state.borrow_mut().over()?,
+            InstrKind::Swap => state.borrow_mut().swap()?,
+            InstrKind::Rot3 => state.borrow_mut().rot3()?,
+            InstrKind::Rot4 => state.borrow_mut().rot4()?,
 
             InstrKind::Read  => todo!(),
             InstrKind::Move  => todo!(),
@@ -130,13 +129,6 @@ impl<'a> State<'a> {
         self.common.push(item.v.unwrap_or(vec![0; size]));
     }
 
-    pub fn push_int(&mut self, value: usize) {
-        self.push(Item {
-            metadata: Metadata { comptime: true, t: Type::Int },
-            v: Some(Vec::from(value.to_ne_bytes()))
-        })
-    }
-
     /// Peek at the top most stack item
     pub fn peek(&self) -> Option<&Metadata> {
         self.items.last()
@@ -147,17 +139,83 @@ impl<'a> State<'a> {
         let metadata = self.items.pop()?;
         let data = self.common.pop(/* todo: use the actual size of the type */ 8);
         match metadata.comptime {
-            true => Some(Item { metadata, v: Some(data) }),
+            true  => Some(Item { metadata, v: Some(data) }),
             false => Some(Item { metadata, v: None })
         }
         
     }
 
-    pub fn pop_int(&mut self) -> Item<Option<usize>> {
-        // if the item is not comptime it will be `None`
-        let item = self.pop().expect("pop item");
-        assert!(item.metadata.t == Type::Int, "type must be integer");
-        item.map(|data| usize::from_ne_bytes(data[..].try_into().unwrap()))
+    /// Drops the element ontop of the stack
+    pub fn drop(&mut self) -> Result<(), TypeError> {
+        self.pop().ok_or(TypeError::unspecified())?;
+        Ok(())
+    }
+
+    /// Duplicates the element ontop of the stack
+    pub fn dup(&mut self) -> Result<(), TypeError> {
+        let item = self.items.last().ok_or(TypeError::unspecified())?;
+        let size = 8; // todo: use item1 actual size of t
+        self.items.push(item.clone());
+        self.common.dup(size); // perform the actual dup
+        Ok(())
+    }
+
+    /// Duplicates the element second last element and pushes the it ontop of the stack
+    /// E.g (A B -> A B A)
+    pub fn over(&mut self) -> Result<(), TypeError> {
+        let len = self.items.len();
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
+        let size1 = 8; // todo: use item1 actual size of t
+        let size2 = 8; // todo: use item2 actual size of t
+        let duplicate = self.items.get(len - 2).ok_or(TypeError::unspecified())?;
+        self.items.push(duplicate.clone());
+        self.common.over(size1, size2); // perform the actual over
+        Ok(())
+    }
+
+    /// Swaps the two elements ontop of the stack
+    pub fn swap(&mut self) -> Result<(), TypeError> {
+        let len = self.items.len();
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
+        let size1 = 8; // todo: use item1 actual size of t
+        let size2 = 8; // todo: use item2 actual size of t
+        self.items.swap(len - 1, len - 2);
+        self.common.swap(size1, size2); // perform the actual swap
+        Ok(())
+    }
+
+    /// Rotate the top 3 elements to the left once
+    // A B C => B C A
+    pub fn rot3(&mut self) -> Result<(), TypeError> {
+        let len = self.items.len();
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
+        let item3 = &self.items.get(len - 3).ok_or(TypeError::unspecified())?.t;
+        let size1 = 8; // todo: use item1 actual size of t
+        let size2 = 8; // todo: use item2 actual size of t
+        let size3 = 8; // todo: use item2 actual size of t
+        self.items[len - 3 .. len].rotate_left(1);
+        self.common.rot3(size1, size2, size3); // perform the actual rotation (rot3)
+        Ok(())
+    }
+
+    /// Rotate the top 4 elements to the left once
+    // A B C D => B C D A
+    pub fn rot4(&mut self) -> Result<(), TypeError> {
+        let len = self.items.len();
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
+        let item3 = &self.items.get(len - 3).ok_or(TypeError::unspecified())?.t;
+        let item4 = &self.items.get(len - 4).ok_or(TypeError::unspecified())?.t;
+        let size1 = 8; // todo: use item1 actual size of t
+        let size2 = 8; // todo: use item2 actual size of t
+        let size3 = 8; // todo: use item2 actual size of t
+        let size4 = 8; // todo: use item2 actual size of t
+        self.items[len - 4 .. len].rotate_left(1);
+        self.common.rot4(size1, size2, size3, size4); // perform the actual rotation (rot4)
+        Ok(())
     }
 
 }
@@ -168,9 +226,19 @@ pub(crate) struct Item<T> {
     v: T, // use tinyvec / stackvec
 }
 
+impl Item<Option<Vec<u8>>> {
+    pub const fn literal(literal: InstrLiteral) -> Self {
+        match literal {
+            InstrLiteral::Int(val) => Self::comptime(Type::Int, usize::to_rh(val)),
+            InstrLiteral::Bool(val) => todo!("bool literal"),
+            _other => todo!("implement str literals as implicit statics as ptr of char")
+        }
+    }
+}
+
 impl<T> Item<Option<T>> {
     pub const fn comptime(t: Type, v: T) -> Self {
-        Self { metadata: Metadata { comptime: false, t }, v: Some(v) }
+        Self { metadata: Metadata { comptime: true, t }, v: Some(v) }
     }
     pub const fn runtime(t: Type) -> Self {
         Self { metadata: Metadata { comptime: false, t }, v: None }
@@ -277,18 +345,22 @@ impl TypeError {
     pub(crate) fn unspanned(kind: TypeErrorKind) -> Self {
         Self { kind, span: Span::default() }
     }
+    pub(crate) fn unspecified() -> Self {
+        Self::unspanned(TypeErrorKind::Unspecified)
+    }
 }
 
 pub(crate) enum TypeErrorKind {
+    Unspecified,
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Expect { want: Type, got: Option<Type> },
-    ExpectAnything,
+    Expect { want: Vec<Type>, got: Vec<Type> },
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
     let diag = match value.kind {
+        TypeErrorKind::Unspecified => unreachable!(), // should be replaced by a more specific error
         TypeErrorKind::UnknownFn { name } => Diagnostic::error("unknown word").code(name),
         TypeErrorKind::BranchesNotEmpty => {
             Diagnostic::error("branch changes stack")
@@ -300,17 +372,10 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
                 .note("both branches have to evaluate to the same types")
         },
         TypeErrorKind::Expect { want, got } => {
-            let diag = Diagnostic::error("type mismatch")
-                .note(format!("want {:?}", want));
-                match got {
-                    Some(t) => diag.note(format!("got {:?}", t)),
-                    None    => diag.note(format!("got <empty>"))
-                }
-        },
-        TypeErrorKind::ExpectAnything => {
             Diagnostic::error("type mismatch")
-                .note("want any item but got nothing")
-        }
+                .note(format!("want {:?}", want))
+                .note(format!("got  {:?}", got))
+        },
     };
     diag
 }
