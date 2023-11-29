@@ -1,10 +1,10 @@
 
-use crate::eval;
+use crate::common;
 
 #[test]
 fn memory() {
 
-    let mut memory = eval::Memory::new();
+    let mut memory = common::Memory::new();
     let id = memory.alloc(1024, 1).unwrap();
     let slice = memory.access_mut(id).unwrap();
     slice.fill(0x41);

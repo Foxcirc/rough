@@ -1,7 +1,7 @@
 
-use std::cell::{RefCell, RefMut};
+use std::{cell::{RefCell, RefMut}, array};
 
-use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type}, arch::Intrinsic, diagnostic::Diagnostic, arena, eval::{self, MemoryPtr, CommonState}};
+use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type}, arch::Intrinsic, diagnostic::Diagnostic, eval, common};
 
 pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
@@ -13,19 +13,19 @@ pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>
         main: base_program.main,
     };
 
-    let mut memory = eval::Memory::new();
+    let mut memory = common::Memory::new();
     // allocate statics here
 
     // set up the stack
     let stack = memory.alloc(1024, 8).expect("allocate stack memory"); // todo: make the stack grow when it needs more space
 
     let state = State {
-        common: CommonState {
+        common: common::CommonState {
             arena: &part.arena,
             memory,
             stack,
         },
-        types: Vec::new(),
+        items: Vec::new(),
     };
 
     let cell = RefCell::new(state);
@@ -63,12 +63,12 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
             InstrKind::Call { to } => todo!(),
             InstrKind::Return => return Ok(()),
 
-            InstrKind::Drop => drop(state.borrow_mut().pop_int()),
-            InstrKind::Dup  => todo!(),
-            InstrKind::Over => todo!(),
-            InstrKind::Swap => todo!(),
-            InstrKind::Rot3 => todo!(),
-            InstrKind::Rot4 => todo!(),
+            InstrKind::Drop => drop(state.borrow_mut().pop()),
+            InstrKind::Dup  => order(state.borrow_mut(), |[lhs]| Ok([lhs.clone(), lhs.clone()]))?,
+            InstrKind::Over => order(state.borrow_mut(), |[lhs, rhs]| Ok([lhs.clone(), rhs, lhs.clone()]))?,
+            InstrKind::Swap => order(state.borrow_mut(), |[lhs, rhs]| Ok([lhs, rhs]))?,
+            InstrKind::Rot3 => order(state.borrow_mut(), |[a, b, c]| Ok([b, c, a]))?,
+            InstrKind::Rot4 => order(state.borrow_mut(), |[a, b, c, d]| Ok([b, c, d, a]))?,
 
             InstrKind::Read  => todo!(),
             InstrKind::Move  => todo!(),
@@ -82,18 +82,10 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
             InstrKind::Arrow => todo!(),
 
-            InstrKind::Add => {
-                let mut borrow = state.borrow_mut();
-                let lhs = check(borrow.pop(), Type::Int)?;
-                let rhs = check(borrow.pop(), Type::Int)?;
-                let result = match comptime([lhs, rhs]) {
-                    Some(value) => run(value, Calc::add),
-                    None => borrow.push(Item::runtime(Type::Int))
-                };
-            },
-            InstrKind::Sub => todo!(),
-            InstrKind::Mul => todo!(),
-            InstrKind::Dvm => todo!(),
+            InstrKind::Add => order(state.borrow_mut(), |values| calc(values, |[lhs, rhs]: [usize; 2]| [lhs + rhs]))?,
+            InstrKind::Sub => order(state.borrow_mut(), |values| calc(values, |[lhs, rhs]: [usize; 2]| [lhs - rhs]))?,
+            InstrKind::Mul => order(state.borrow_mut(), |values| calc(values, |[lhs, rhs]: [usize; 2]| [lhs * rhs]))?,
+            InstrKind::Dvm => order(state.borrow_mut(), |values| calc(values, |[lhs, rhs]: [usize; 2]| [lhs / rhs, lhs % rhs]))?,
 
             InstrKind::Not => todo!(),
             InstrKind::And => todo!(),
@@ -126,37 +118,37 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
 // very similar to the state in eval
 pub(crate) struct State<'a> {
-    common: CommonState<'a>,
-    pub types: Vec<Metadata>,
+    common: common::CommonState<'a>,
+    pub items: Vec<Metadata>,
 }
 
 impl<'a> State<'a> {
 
     pub fn push(&mut self, item: Item<Option<Vec<u8>>>) {
         let size = 8; // todo: use actual size of t
-        self.types.push(item.metadata);
-        self.common.push(item.data.unwrap_or(vec![0; size]));
+        self.items.push(item.metadata);
+        self.common.push(item.v.unwrap_or(vec![0; size]));
     }
 
     pub fn push_int(&mut self, value: usize) {
         self.push(Item {
             metadata: Metadata { comptime: true, t: Type::Int },
-            data: Some(Vec::from(value.to_ne_bytes()))
+            v: Some(Vec::from(value.to_ne_bytes()))
         })
     }
 
     /// Peek at the top most stack item
     pub fn peek(&self) -> Option<&Metadata> {
-        self.types.last()
+        self.items.last()
     }
 
     pub fn pop(&mut self) -> Option<Item<Option<Vec<u8>>>> {
         // if the item is not comptime it will be `None`
-        let metadata = self.types.pop()?;
+        let metadata = self.items.pop()?;
         let data = self.common.pop(/* todo: use the actual size of the type */ 8);
         match metadata.comptime {
-            true => Some(Item { metadata, data: Some(data) }),
-            false => Some(Item { metadata, data: None })
+            true => Some(Item { metadata, v: Some(data) }),
+            false => Some(Item { metadata, v: None })
         }
         
     }
@@ -170,20 +162,24 @@ impl<'a> State<'a> {
 
 }
 
+#[derive(Clone)]
 pub(crate) struct Item<T> {
     pub metadata: Metadata,
-    data: T, // use tinyvec / stackvec
+    v: T, // use tinyvec / stackvec
 }
 
 impl<T> Item<Option<T>> {
-    pub fn runtime(t: Type) -> Self {
-        Self { metadata: Metadata { comptime: false, t }, data: None }
+    pub const fn comptime(t: Type, v: T) -> Self {
+        Self { metadata: Metadata { comptime: false, t }, v: Some(v) }
+    }
+    pub const fn runtime(t: Type) -> Self {
+        Self { metadata: Metadata { comptime: false, t }, v: None }
     }
     /// Maps the items data if it is `Some`
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> Item<Option<U>> {
         Item {
             metadata: self.metadata,
-            data: if let Some(data) = self.data {
+            v: if let Some(data) = self.v {
                 Some(func(data))
             } else {
                 None
@@ -192,9 +188,81 @@ impl<T> Item<Option<T>> {
     }
 }
 
+pub(crate) type RawItem = Item<Option<Vec<u8>>>;
+
+#[derive(Clone)]
 pub(crate) struct Metadata {
     comptime: bool,
     t: Type,
+}
+
+pub(crate) fn check(item: Option<RawItem>, want: Type) -> Result<RawItem, TypeError> {
+    if let Some(item) = item {
+        if item.metadata.t != want {
+            Err(TypeError::unspanned(TypeErrorKind::Expect { want, got: Some(item.metadata.t) }))
+        } else {
+            Ok(item)
+        }
+    } else {
+        Err(TypeError::unspanned(TypeErrorKind::Expect { want, got: None }))
+    }
+}
+
+pub(crate) trait FromRh {
+    const TYPE: Type;
+    fn from_rh(rh: Vec<u8>) -> Self;
+}
+
+impl FromRh for usize { // todo: use RhInt
+    const TYPE: Type = Type::Int;
+    fn from_rh(rh: Vec<u8>) -> Self {
+        usize::from_ne_bytes(rh.try_into().expect("convert to rust usize"))
+    }
+}
+
+pub(crate) trait ToRh {
+    const TYPE: Type;
+    fn to_rh(rh: Self) -> Vec<u8>;
+}
+
+impl ToRh for usize { // todo: use RhInt
+    const TYPE: Type = Type::Int;
+    fn to_rh(rh: Self) -> Vec<u8> {
+        Vec::from(rh.to_ne_bytes())
+    }
+}
+
+pub(crate) fn order<const IN: usize, const ON: usize, F>(mut borrow: RefMut<State>, func: F) -> Result<(), TypeError>
+    where F: FnOnce([RawItem; IN]) -> Result<[RawItem; ON], TypeError>
+{
+
+    const IT: Option<RawItem> = None;
+    let mut items = [IT; IN];
+    for idx in (0..IN).rev() {
+        let checked = borrow.pop().ok_or(TypeError::unspanned(TypeErrorKind::ExpectAnything))?;
+        items[idx] = Some(checked);
+    };
+
+    let inputs = items.map(|item| item.unwrap());
+    let outputs = func(inputs)?;
+    for item in outputs { borrow.push(item) }
+
+    Ok(())
+}
+
+pub(crate) fn calc<const IN: usize, const ON: usize, F, I, O>(values: [RawItem; IN], func: F) -> Result<[RawItem; ON], TypeError>
+    where F: FnOnce([I; IN]) -> [O; ON], I: FromRh + Default + Copy, O: ToRh
+{
+
+    let comptime = values.iter().all(|item| item.v.is_some());
+    if comptime {
+        let inputs = values.map(|item| I::from_rh(item.v.unwrap()));
+        let result = func(inputs);
+        Ok(result.map(|val| Item::comptime(O::TYPE, O::to_rh(val))))
+    } else {
+        Ok(array::from_fn(|_| Item::runtime(O::TYPE)))
+    }
+
 }
 
 pub(crate) struct TypeError {
@@ -215,7 +283,8 @@ pub(crate) enum TypeErrorKind {
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Mismatch { want: Type, got: Option<Type> },
+    Expect { want: Type, got: Option<Type> },
+    ExpectAnything,
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
@@ -230,7 +299,7 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
             Diagnostic::error("branches not equal")
                 .note("both branches have to evaluate to the same types")
         },
-        TypeErrorKind::Mismatch { want, got } => {
+        TypeErrorKind::Expect { want, got } => {
             let diag = Diagnostic::error("type mismatch")
                 .note(format!("want {:?}", want));
                 match got {
@@ -238,6 +307,10 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
                     None    => diag.note(format!("got <empty>"))
                 }
         },
+        TypeErrorKind::ExpectAnything => {
+            Diagnostic::error("type mismatch")
+                .note("want any item but got nothing")
+        }
     };
     diag
 }

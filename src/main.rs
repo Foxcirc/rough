@@ -6,6 +6,7 @@ pub mod diagnostic;
 pub mod arena;
 pub mod parser;
 pub mod basegen;
+pub mod common;
 pub mod typegen;
 pub mod eval;
 
@@ -27,7 +28,7 @@ fn main() {
                 cli::CliError::Invalid(what, got) => Diagnostic::error(format!("invalid {}", what)).code(got),
                 cli::CliError::UnknownFlag(other) => Diagnostic::error("invalid flag").note(&other),
             };
-            diag.emit();
+            diag.note("use -h or --help to show available options").emit();
             return
         },
         Ok(cli::Opts { help: cli::Help::Version, .. }) => {
@@ -58,6 +59,8 @@ fn main() {
     });
 
     // asynchronously compile the program
+    // we use async to do the computation efficiently in a multi-threaded
+    // fashion and to avoid manually constructing a dependency tree
 
     let max_threads = num_cpus::get();
     let num_threads = unique.opts.threads.as_ref().copied().unwrap_or(max_threads).clamp(1, max_threads);
@@ -89,6 +92,8 @@ fn main() {
         });
         handles.push(handle);
     }
+
+    // todo: implement dynamically setting the thread_count during compilation (spawn threads inside `compile`)
 
     // wait for all workers to finish
     for handle in handles {
@@ -208,7 +213,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             Diagnostic::debug(format!("compiling module `{}`", module_name)).emit();
         }
 
-        let data = match fs::read_to_string(&path) {
+        let data = match fs::read_to_string(&path) { // todo: use nonblocking fs (rio)
             Ok(val) => val,
             Err(err) => {
                 Diagnostic::error("cannot read input file")
@@ -284,8 +289,8 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
         let mut guard = shared.cache.write().await;
         let entry = guard.get_mut(&path).expect("module must be present");
         if let CompilationState::InProgress(waitstate) = entry {
-            waitstate.flag.store(true, Ordering::SeqCst); // todo: what ordering to use here
-            waitstate.event.notify(usize::MAX); // todo: use notify_relaxed here?
+            waitstate.flag.store(true, Ordering::Release);
+            waitstate.event.notify(usize::MAX);
         } else {
             unreachable!()
         }
