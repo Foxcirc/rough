@@ -69,7 +69,9 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
             InstrKind::Rot3 => state.borrow_mut().rot3()?,
             InstrKind::Rot4 => state.borrow_mut().rot4()?,
 
-            InstrKind::Read  => todo!(),
+            InstrKind::Read  => {
+                println!("{:?}", state.borrow_mut().items.iter().map(|it| &it.t).collect::<Vec<_>>())
+            },
             InstrKind::Move  => todo!(),
             InstrKind::Write => todo!(),
 
@@ -240,7 +242,10 @@ impl<'a> State<'a> {
         }
         // comptime or runtime
         if md1.comptime && md2.comptime {
+            let len = self.items.len();
+            self.items.truncate(len - 2);
             self.common.math_op_1(op);
+            self.items.push(Metadata { comptime: true, t: Type::Int })
         } else {
             self.shrink_by(2);
             self.push(Item::runtime(Type::Int));
@@ -378,7 +383,7 @@ pub(crate) enum TypeErrorKind {
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
     let diag = match value.kind {
-        TypeErrorKind::Unspecified => unreachable!(), // should be replaced by a more specific error
+        TypeErrorKind::Unspecified => unreachable!("unspecified type error"), // should be replaced by a more specific error
         TypeErrorKind::UnknownFn { name } => Diagnostic::error("unknown word").code(name),
         TypeErrorKind::BranchesNotEmpty => {
             Diagnostic::error("branch changes stack")
