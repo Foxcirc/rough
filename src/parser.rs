@@ -350,6 +350,7 @@ pub(crate) enum Type {
     // standard types
     Int,
     Bool,
+    // todo: use Rc to store something like Ptr so cloning is cheap
     // Char,
     // Ptr { inner: Box<Type> }, // todo: add slice type
     // fine-grained integer types

@@ -37,6 +37,14 @@ pub(crate) fn eval<I: Intrinsic>(input: TranslationUnit<Program<I>>) -> Result<(
 
 }
 
+pub(crate) fn literal_to_bytes(literal: &InstrLiteral) -> Vec<u8> {
+    match literal {
+        InstrLiteral::Int(val) => Vec::from(val.to_ne_bytes()),
+        InstrLiteral::Bool(_val) => todo!("bool literal in eval"),
+        InstrLiteral::Str(..) => unreachable!(),
+    }
+}
+
 fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result<(), EvalError> {
     
     for instr in fun.body.iter() {
@@ -45,13 +53,12 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
 
             InstrKind::Label { label, producer } => todo!(),
 
-            InstrKind::Push { value: InstrLiteral::Int(number) } => state.push_int(*number),
-            InstrKind::Push { .. } => todo!(),
+            InstrKind::Push { value } => state.common.push(literal_to_bytes(value)),
 
             InstrKind::Call { to } => todo!(),
             InstrKind::Return => return Ok(()),
 
-            InstrKind::Drop => drop(state.pop_int()),
+            InstrKind::Drop => drop(state.common.pop(8)),
             InstrKind::Dup  => todo!(),
             InstrKind::Over => todo!(),
             InstrKind::Swap => todo!(),
@@ -70,12 +77,7 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
 
             InstrKind::Arrow => todo!(),
 
-            InstrKind::Add => {
-                let lhs = state.pop_int();
-                let rhs = state.pop_int();
-                let t = state.pop(8);
-                println!("{lhs} + {rhs} = {}", lhs + rhs);
-            },
+            InstrKind::Add => state.common.math_op_1(|lhs, rhs| lhs + rhs),
             InstrKind::Sub => todo!(),
             InstrKind::Mul => todo!(),
             InstrKind::Dvm => todo!(),
@@ -105,22 +107,24 @@ fn eval_fun<I: Intrinsic>(state: &mut State, fun: &FunWithMetadata<I>) -> Result
 }
 
 struct State<'a> {
-    common: common::CommonState<'a>,
+    pub common: common::CommonState<'a>,
 }
 
 impl<'a> State<'a> {
-    pub fn push(&mut self, value: Vec<u8>) {
-        self.common.push(value)
-    }
-    pub fn pop(&mut self, size: usize) -> Vec<u8> {
-        self.common.pop(size)
-    }
-    pub fn push_int(&mut self, value: usize) {
-        self.common.push_int(value)
-    }
-    pub fn pop_int(&mut self) -> usize {
-        self.common.pop_int()
-    }
+
+    pub fn push(&mut self, data: Vec<u8>) { self.common.push(data) }
+    pub fn pop(&mut self, size: usize) -> Vec<u8> { self.common.pop(size) }
+    pub fn shrink(&mut self, size: usize) { self.common.shrink_by(size) }
+    pub fn dup(&mut self, size: usize) { self.common.dup(size) }
+    pub fn over(&mut self, size1: usize, size2: usize) { self.common.over(size1, size2) }
+    pub fn swap(&mut self, size1: usize, size2: usize) { self.common.swap(size1, size2) }
+    pub fn rot3(&mut self, size1: usize, size2: usize, size3: usize) { self.common.rot3(size1, size2, size3) }
+    pub fn rot4(&mut self, size1: usize, size2: usize, size3: usize, size4: usize) { self.common.rot4(size1, size2, size3, size4) }
+    pub fn add(&mut self) { self.common.math_op_1(|lhs, rhs| lhs + rhs) }
+    pub fn sub(&mut self) { self.common.math_op_1(|lhs, rhs| lhs - rhs) }
+    pub fn mul(&mut self) { self.common.math_op_1(|lhs, rhs| lhs * rhs) }
+    pub fn dvm(&mut self) { self.common.math_op_2(|lhs, rhs| (lhs / rhs, lhs % rhs)) }
+
 }
 
 // todo: impl debug and Error for all errors, so they can be used as actuall error types (eg .unwrap works only for Debug types)

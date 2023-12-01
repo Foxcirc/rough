@@ -126,6 +126,17 @@ impl<'a> CommonState<'a> {
         Vec::from(&slice[..size])
     }
 
+    /// Shorten the stack by `size`
+    /// Inside a debug build this still checks if the new pointer is valid to prevent the error
+    /// from occuring later
+    #[track_caller]
+    pub fn shrink_by(&mut self, size: usize) {
+        self.stack.add_offset(- (size as isize));
+        if cfg!(debug_assertions) {
+            self.memory.access_mut(self.stack).expect("shrink: check stack memory");
+        }
+    }
+
     #[track_caller]
     pub fn dup(&mut self, size: usize) {
 
@@ -244,6 +255,49 @@ impl<'a> CommonState<'a> {
             self.push(two);
 
         }
+
+    }
+
+    /// determines the sizes by the rust types passed as closure parameters
+    #[track_caller]
+    pub fn math_op_1(&mut self, op: impl FnOnce(usize, usize) -> usize) {
+
+        let size = mem::size_of::<usize>(); // todo: this will not always be 8 (same as when pushing??)
+        self.stack.add_offset(- (size as isize * 2));
+
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        let (ptr2, rest) = slice.split_at_mut(size);
+        let ptr1 = &rest[..size];
+
+        let item2 = usize::from_ne_bytes(ptr2.try_into().unwrap()); // todo: update integer type to be u64 or at least a custom alias like RhInt
+        let item1 = usize::from_ne_bytes(ptr1.try_into().unwrap());
+        let result = op(item2, item1);
+
+        ptr2.copy_from_slice(&result.to_ne_bytes());
+
+        self.stack.add_offset(size as isize);
+
+    }
+
+    /// Pushes the 0th tuple values onto the stack first
+    #[track_caller]
+    pub fn math_op_2(&mut self, op: impl FnOnce(usize, usize) -> (usize, usize)) {
+
+        let size = mem::size_of::<usize>(); // todo: this will not always be 8 (same as when pushing??)
+        self.stack.add_offset(- (size as isize * 2));
+
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory");
+        let (ptr2, rest) = slice.split_at_mut(size);
+        let ptr1 = &mut rest[..size];
+
+        let item2 = usize::from_ne_bytes(ptr2.try_into().unwrap()); // todo: update integer type to be u64 or at least a custom alias like RhInt
+        let item1 = usize::from_ne_bytes(ptr1.try_into().unwrap());
+        let (result2, result1) = op(item2, item1);
+
+        ptr2.copy_from_slice(&result2.to_ne_bytes());
+        ptr1.copy_from_slice(&result1.to_ne_bytes());
+
+        self.stack.add_offset(size as isize * 2);
 
     }
 
