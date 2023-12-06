@@ -50,12 +50,13 @@ fn main() {
         }
     };
 
-    env::set_current_dir(working_dir).expect("cannot set working directory");
+    env::set_current_dir(working_dir).expect("set working directory");
 
     let unique = Arc::new(SharedState {
         opts,
         executor: async_executor::Executor::new(),
         cache: async_lock::RwLock::new(HashMap::new()),
+        rio: rio::new().expect("create io_uring context"),
     });
 
     // asynchronously compile the program
@@ -213,17 +214,15 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             Diagnostic::debug(format!("compiling module `{}`", module_name)).emit();
         }
 
-        let data = match fs::read_to_string(&path) { // todo: use nonblocking fs (rio)
+        let content = match async_read_to_string(&path, &shared.rio).await {
             Ok(val) => val,
-            Err(err) => {
-                Diagnostic::error("cannot read input file")
-                    .note(err.to_string().to_lowercase())
-                    .emit();
+            Err(diag) => {
+                diag.note(format!("module `{}`", module_name)).emit();
                 return Err(())
             }
         };
 
-        let source = match parser::parse(&data) {
+        let source = match parser::parse(&content) {
             Ok(val) => val,
             Err(err) => {
                 parser::format_error(err)
@@ -307,10 +306,50 @@ fn split_path(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
     Some((path.parent()?.to_path_buf(), path.file_name()?.to_os_string()))
 }
 
+async fn async_read_to_string(path: &path::Path, rio: &rio::Rio) -> Result<String, Diagnostic> {
+
+    let file = match fs::File::open(&path) {
+        Ok(val) => val,
+        Err(err) => {
+            return Err(Diagnostic::error("cannot open module")
+                .note(err.to_string().to_lowercase()))
+        }
+    };
+
+    let mut buf = Vec::new();
+    let mut to_read = 1024;
+    let mut total_bytes_read = 0;
+    loop {
+        let len = buf.len();
+        buf.resize(len + to_read, 0);
+        let bytes_read = match rio.read_at(&file, &mut (&mut buf[len..len + to_read]), total_bytes_read as u64).await { // todo: why the fuck does this take a ref and not a mut ref (as iov), tho i am giving it &mut here just to be sure
+            Ok(val) => val,
+            Err(err) => {
+                return Err(Diagnostic::error("cannot read file")
+                    .note(err.to_string().to_lowercase()))
+            }
+        };
+        buf.truncate(len + bytes_read);
+        to_read *= 2;
+        total_bytes_read += bytes_read;
+        if bytes_read == 0 { break }
+    }
+
+    match String::from_utf8(buf) {
+        Ok(val) => Ok(val),
+        Err(err) => {
+            return Err(Diagnostic::error("invalid utf8")
+                .note(format!("valid up to byte {}", err.utf8_error().valid_up_to())))
+        }
+    }
+
+}
+
 struct SharedState<'a, I: Send + Sync> {
     pub opts: cli::Opts,
     pub executor: async_executor::Executor<'a>,
     pub cache: async_lock::RwLock<HashMap<path::PathBuf, CompilationState<I>>>,
+    pub rio: rio::Rio,
 }
 
 enum CompilationState<I> {

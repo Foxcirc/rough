@@ -187,7 +187,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 pub(crate) enum InstrLiteral {
     Int(usize),
     Bool(bool),
-    Type(TypeId),
+    Type(TypeFull),
     Str(String),
 }
 

@@ -2,7 +2,7 @@
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
 use std::cell::RefCell;
-use crate::{diagnostic, arena::{self, StrArena}, basegen::{TypeFull, Type}};
+use crate::{diagnostic::{self, Diagnostic}, arena::{self, StrArena}, basegen::{TypeFull, Type}};
 
 pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, FinalParseError<'d>> {
     let arena = RefCell::new(arena::StrArena::default());
@@ -263,25 +263,23 @@ pub(crate) type ParseInput<'a, 'b> = LocatedSpan<&'a str, &'b RefCell<arena::Str
 pub(crate) type ParseError<'a, 'b> = VerboseError<ParseInput<'a, 'b>>;
 pub(crate) type FinalParseError<'a> = VerboseError<LocatedSpan<&'a str>>;
 
-pub(crate) fn format_error(value: FinalParseError) -> diagnostic::Diagnostic {
+pub(crate) fn format_error(value: FinalParseError) -> Diagnostic {
 
-    let mut diag = diagnostic::Diagnostic::error("invalid source file");
+    let mut diag = Diagnostic::error("invalid source file");
 
-    // todo: implement this again
+    if let Some((span, _)) = value.errors.first() {
+        let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
+        let (before, highlight, after) = split_at_char_index(code, span.get_utf8_column() - 1);
+        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
+        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column(), offset: span.location_offset() });
+    }
 
-//    if let Some((span, _)) = value.errors.first() {
-//        let code = std::str::from_utf8(span.get_line_beginning()).expect("invalid utf-8");
-//        let (before, highlight, after) = split_at_char_index(code, span.get_utf8_column() - 1);
-//        diag.code = Some(format!("{}\x1b[4m{}\x1b[24m{}", before, highlight, after).trim().to_string());
-//        diag.pos  = Some(diagnostic::Pos { line: span.location_line() as usize, column: span.get_column(), offset: span.location_offset() });
-//    }
-//
-//    for (_, kind) in value.errors.iter() {
-//        if let VerboseErrorKind::Context(message) = kind {
-//            diag.notes.push(message.to_string());
-//            break
-//        }
-//    }
+    for (_, kind) in value.errors.iter() {
+        if let VerboseErrorKind::Context(message) = kind {
+            diag.notes.push(message.to_string());
+            break
+        }
+    }
 
     diag
 
