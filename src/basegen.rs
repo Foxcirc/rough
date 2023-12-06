@@ -1,7 +1,7 @@
 
 
-use std::{fmt, collections::HashMap, borrow::Cow};
-use crate::{parser::{Literal, OpKind, Op, Span, Identifier, Type, TranslationUnit, ParsedItems}, diagnostic::Diagnostic, arch::Intrinsic, arena};
+use std::{fmt, collections::HashMap};
+use crate::{parser::{Literal, OpKind, Op, Span, Identifier, TranslationUnit, ParsedItems, TypeDef}, diagnostic::Diagnostic, arch::Intrinsic, arena};
 
 pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Result<TranslationUnit<BaseProgram<I>>, CodegenError> {
 
@@ -13,6 +13,27 @@ pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Res
         arena: source.arena,
         main: source.main
     };
+
+    for item in source.inner.types.into_iter() {
+
+        // generate bytecode for the signature
+        let mut signature_state = State {
+            bytecode: Vec::with_capacity(item.signature.len()),
+            counter: 0,
+            arena: &part.arena
+        };
+
+        // todo: process signature as a tuple and generalize basegen for tuples
+        codegen_block(&mut signature_state, item.signature, None)?;
+        signature_state.bytecode.push(Instr::spanned(InstrKind::Return, item.span)); // todo: generate return for signature?
+
+        let fun = TypeWithMetadata {
+            signature: signature_state.bytecode,
+        };
+
+        part.inner.types.insert(item.name, fun);
+    
+    }
 
     for item in source.inner.funs.into_iter() {
 
@@ -166,6 +187,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 pub(crate) enum InstrLiteral {
     Int(usize),
     Bool(bool),
+    Type(TypeId),
     Str(String),
 }
 
@@ -175,6 +197,7 @@ impl InstrLiteral {
             Literal::Int(val)  => Self::Int(val),
             Literal::Bool(val) => Self::Bool(val),
             Literal::Str(val)  => Self::Str(val),
+            Literal::Type(val)  => Self::Type(val),
             Literal::Tuple(..) => unreachable!(),
         }
     }
@@ -275,7 +298,7 @@ impl<'a, I> State<'a, I> {
 
 pub(crate) struct BaseProgram<I> {
     pub funs: HashMap<Identifier, FunWithMetadata<I>>,
-    pub types: HashMap<Cow<'static, str>, Type>,
+    pub types: HashMap<Identifier, TypeWithMetadata<I>>,
 }
 
 // cannot derive Default because of the generics
@@ -288,9 +311,23 @@ impl<I> Default for BaseProgram<I> {
     }
 }
 
+pub(crate) enum CommonIdentifier {
+    Common(&'static str),
+    Runtime(Identifier)
+}
+
+impl CommonIdentifier {
+    fn get<'a>(&self, arena: &'a arena::StrArena) -> &'a str {
+        match self {
+            CommonIdentifier::Common(val) => val,
+            CommonIdentifier::Runtime(val) => arena.get(*val)
+        }
+    }
+}
+
 pub(crate) struct Program<I> {
     pub funs: HashMap<Identifier, FunWithMetadata<I>>,
-    pub types: HashMap<Cow<'static, str>, Type>,
+    pub types: HashMap<Identifier, TypeWithMetadata<I>>,
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
@@ -308,6 +345,52 @@ fn find_label<I: Intrinsic>(bytecode: &BytecodeSlice<I>, label: Label, producer:
 pub(crate) struct FunWithMetadata<I> { // todo: rename to basegenFun
     pub signature: Bytecode<I>,
     pub body: Bytecode<I>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TypeWithMetadata<I> { // todo: rename to basegenFun
+    pub signature: Bytecode<I>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TypeFull {
+    pub comptime: bool,
+    pub t: Type,
+}
+
+impl TypeFull {
+    pub fn runtime(t: Type) -> Self {
+        Self { comptime: false, t }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Type {
+    // special type used for typechecking, not to the same as `any` inside signatures
+    // Any,
+    // the type of types
+    Type,
+    // standard types
+    Int,
+    Bool,
+    // todo: use Rc to store something like Ptr so cloning is cheap
+    // Char,
+    // Ptr { inner: Box<Type> }, // todo: add slice type
+    // Slice { ptr: Box<Type>, len: usize },
+    // fine-grained integer types
+    // U8,
+    // U16,
+    // U32,
+    // U64,
+    // I8,
+    // I16,
+    // I32,
+    // I64,
+    // type
+    // Type,
+    // complex types
+    // Array { inner: Box<Type>, len: usize },
+    // Tuple { inner: Vec<Type> },
 }
 
 pub(crate) struct CodegenError {

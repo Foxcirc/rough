@@ -1,7 +1,7 @@
 
-use std::{cell::{RefCell, RefMut}, array};
+use std::cell::{RefCell, RefMut};
 
-use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Type}, arch::Intrinsic, diagnostic::Diagnostic, eval, common::{self, CommonState}};
+use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral, Type, TypeFull}, parser::{Span, TranslationUnit}, arch::Intrinsic, diagnostic::Diagnostic, eval, common::{self, CommonState}};
 
 pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
@@ -26,6 +26,7 @@ pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>
             stack,
         },
         items: Vec::new(),
+        // types: &base_program.inner.types,
     };
 
     let cell = RefCell::new(state);
@@ -38,7 +39,7 @@ pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>
 
     let mut state = cell.into_inner();
     state.common.memory.dealloc(state.common.stack).expect("deallocate stack memory");
-    assert!(state.common.memory.allocations() == 0, "some memory was leaked");
+    assert!(state.common.memory.allocations() == 0, "some memory was leaked"); // todo: also assert this in eval
 
     part.inner.funs = base_program.inner.funs;
     part.inner.types = base_program.inner.types;
@@ -120,7 +121,7 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 // very similar to the state in eval
 pub(crate) struct State<'a> {
     common: common::CommonState<'a>,
-    pub items: Vec<Metadata>,
+    pub items: Vec<TypeFull>,
 }
 
 impl<'a> State<'a> {
@@ -132,7 +133,7 @@ impl<'a> State<'a> {
     }
 
     /// Peek at the top most stack item
-    pub fn peek(&self, sub: usize) -> Option<&Metadata> {
+    pub fn peek(&self, sub: usize) -> Option<&TypeFull> {
         let len = self.items.len();
         self.items.get(len - sub - 1)
     }
@@ -245,7 +246,7 @@ impl<'a> State<'a> {
             let len = self.items.len();
             self.items.truncate(len - 2);
             self.common.math_op_1(op);
-            self.items.push(Metadata { comptime: true, t: Type::Int })
+            self.items.push(TypeFull { comptime: true, t: Type::Int })
         } else {
             self.shrink_by(2);
             self.push(Item::runtime(Type::Int));
@@ -294,33 +295,28 @@ impl<'a> State<'a> {
 
 #[derive(Clone)]
 pub(crate) struct Item<T> {
-    pub metadata: Metadata,
+    pub metadata: TypeFull,
     v: T, // use tinyvec / stackvec
 }
 
 impl Item<Option<Vec<u8>>> {
     pub fn literal(literal: InstrLiteral) -> Self {
         match literal {
-            InstrLiteral::Int(val) => Self::comptime(Type::Int, usize::to_rh(val)),
-            InstrLiteral::Bool(_val) => todo!("bool literal"),
-            _other => todo!("implement str literals as implicit statics as ptr of char")
+            InstrLiteral::Int(val) => Self::comptime(Type::Int, usize::to_rh(val)), // layout of usize
+            InstrLiteral::Bool(_val) => todo!("bool literal"), // layout of u8
+            InstrLiteral::Type(_val) => todo!("type literal"), // layout of (u8 'comptime, u32 'discriminant, usize 'data) todo: use a typeId!!!
+            InstrLiteral::Str(_val) => todo!("implement str literals as implicit statics as ptr of char")
         }
     }
 }
 
 impl<T> Item<Option<T>> {
     pub const fn comptime(t: Type, v: T) -> Self {
-        Self { metadata: Metadata { comptime: true, t }, v: Some(v) }
+        Self { metadata: TypeFull { comptime: true, t }, v: Some(v) }
     }
     pub const fn runtime(t: Type) -> Self {
-        Self { metadata: Metadata { comptime: false, t }, v: None }
+        Self { metadata: TypeFull { comptime: false, t }, v: None }
     }
-}
-
-#[derive(Clone)]
-pub(crate) struct Metadata {
-    pub comptime: bool,
-    pub t: Type,
 }
 
 pub(crate) trait FromRh {
@@ -362,13 +358,13 @@ impl TypeError {
     pub(crate) fn unspecified() -> Self {
         Self::unspanned(TypeErrorKind::Unspecified)
     }
-    pub(crate) fn expect_types(want: Vec<Type>, got: Vec<Metadata>) -> Self {
+    pub(crate) fn expect_types(want: Vec<Type>, got: Vec<TypeFull>) -> Self {
         Self::unspanned(TypeErrorKind::Expect {
-            want: want.into_iter().map(|t| Metadata { comptime: false, t }).collect(),
+            want: want.into_iter().map(|t| TypeFull { comptime: false, t }).collect(),
             got
         })
     }
-    pub(crate) fn expect_metadata(want: Vec<Metadata>, got: Vec<Metadata>) -> Self {
+    pub(crate) fn expect_metadata(want: Vec<TypeFull>, got: Vec<TypeFull>) -> Self {
         Self::unspanned(TypeErrorKind::Expect { want, got })
     }
 }
@@ -378,7 +374,7 @@ pub(crate) enum TypeErrorKind {
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Expect { want: Vec<Metadata>, got: Vec<Metadata> },
+    Expect { want: Vec<TypeFull>, got: Vec<TypeFull> },
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
@@ -403,7 +399,7 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
     diag
 }
 
-fn format_metadata(mds: Vec<Metadata>) -> String {
+fn format_metadata(mds: Vec<TypeFull>) -> String {
     format!("{:?}", mds.into_iter().map(|it| {
         if it.comptime { format!("comptime {:?}", it.t) }
         else { format!("{:?}", it.t) }

@@ -41,6 +41,7 @@ pub(crate) fn literal_to_bytes(literal: &InstrLiteral) -> Vec<u8> {
     match literal {
         InstrLiteral::Int(val) => Vec::from(val.to_ne_bytes()),
         InstrLiteral::Bool(_val) => todo!("bool literal in eval"),
+        InstrLiteral::Type(_val) => todo!("type literal in eval"),
         InstrLiteral::Str(..) => unreachable!(),
     }
 }

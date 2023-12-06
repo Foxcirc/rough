@@ -2,7 +2,7 @@
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
 use std::cell::RefCell;
-use crate::{diagnostic, arena::{self, StrArena}};
+use crate::{diagnostic, arena::{self, StrArena}, basegen::{TypeFull, Type}};
 
 pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, FinalParseError<'d>> {
     let arena = RefCell::new(arena::StrArena::default());
@@ -148,6 +148,10 @@ pub(crate) fn parse_op<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, O
                 value(OpKind::Gte, terminated(tag("gte"), multispace1)),
                 value(OpKind::Lt,  terminated(tag("lt"),  multispace1)),
                 value(OpKind::Lte, terminated(tag("lte"), multispace1)),
+            )),
+            alt((
+               value(OpKind::Push { value: Literal::Type(TypeFull::runtime(Type::Int)) },  terminated(tag("int"), multispace1)),
+               value(OpKind::Push { value: Literal::Type(TypeFull::runtime(Type::Bool)) }, terminated(tag("bool"), multispace1)),
             )),
             alt((
                 map(preceded(pair(tag("if"),   multispace1), cut(parse_block)), |block| OpKind::If   { block }),
@@ -344,34 +348,6 @@ pub(crate) struct TypeDef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Type {
-    // special type used for typechecking, not to the same as `any` inside signatures
-    Any,
-    // standard types
-    Int,
-    Bool,
-    // todo: use Rc to store something like Ptr so cloning is cheap
-    // Char,
-    // Ptr { inner: Box<Type> }, // todo: add slice type
-    // fine-grained integer types
-    // U8,
-    // U16,
-    // U32,
-    // U64,
-    // I8,
-    // I16,
-    // I32,
-    // I64,
-    // type
-    // Type,
-    // complex types
-    // Array { inner: Box<Type>, length: usize },
-    // Tuple { inner: Vec<Type> },
-    // user types (newtype)
-    // New { name: &'a str, size: u64 }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Op {
     pub(crate) kind: OpKind,
     pub(crate) span: Span,
@@ -433,6 +409,7 @@ pub(crate) enum Literal {
     Int(usize),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
+    Type(TypeFull),
     Tuple(Vec<Op>),
 }
 
