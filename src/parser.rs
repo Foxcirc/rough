@@ -2,15 +2,15 @@
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
 use std::cell::RefCell;
-use crate::{diagnostic::{self, Diagnostic}, arena::{self, StrArena}, basegen::{TypeFull, Type}};
+use crate::{diagnostic::{self, Diagnostic}, intern, basegen::{TypeFull, Type}};
 
 pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, FinalParseError<'d>> {
-    let arena = RefCell::new(arena::StrArena::default());
-    parse_items(LocatedSpan::new_extra(dat, &arena)).finish()
+    let interner = RefCell::new(intern::StrInterner::new());
+    parse_items(LocatedSpan::new_extra(dat, &interner)).finish()
         .map_err(|err| ignore_extra(err))
         .map(|res| res.1)
         .map(move |mut res| {
-            res.arena = arena.into_inner();
+            res.arena = interner.into_inner();
             res
         })
 }
@@ -37,23 +37,23 @@ pub(crate) fn parse_items<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b
 }
 
 struct Accumulator<'a> {
-    pub arena: &'a RefCell<StrArena>,
+    pub interner: &'a RefCell<intern::StrInterner>,
     pub value: TranslationUnit<ParsedItems>,
 }
 
 impl<'a> Accumulator<'a> {
-    fn with_arena(arena: &'a RefCell<StrArena>) -> impl FnMut() -> Accumulator<'a> {
-        move || Self { arena, value: TranslationUnit::default() }
+    fn with_arena(interner: &'a RefCell<intern::StrInterner>) -> impl FnMut() -> Accumulator<'a> {
+        move || Self { interner, value: TranslationUnit::default() }
     }
 }
 
 fn assign_item<'a>(mut acc: Accumulator, item: Item) -> Accumulator {
     match item {
-        Item::Comment      => (),
-        Item::Use(val)     => acc.value.inner.uses.push(val),
-        Item::FunDef(val)  => {
+        Item::Comment     => (),
+        Item::Use(val)    => acc.value.inner.uses.push(val),
+        Item::FunDef(val) => {
             // save the main fn's id for execution later
-            if acc.arena.borrow().get(val.name) == "main" {
+            if acc.interner.borrow().get(&val.name) == "main" {
                 acc.value.main = Some(val.name);
             }
             acc.value.inner.funs.push(val)
@@ -259,7 +259,7 @@ pub(crate) fn parse_tuple_literal<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResul
 }
 
 pub(crate) type ParseResult<'a, 'b, O> = IResult<ParseInput<'a, 'b>, O, ParseError<'a, 'b>>;
-pub(crate) type ParseInput<'a, 'b> = LocatedSpan<&'a str, &'b RefCell<arena::StrArena>>;
+pub(crate) type ParseInput<'a, 'b> = LocatedSpan<&'a str, &'b RefCell<intern::StrInterner>>;
 pub(crate) type ParseError<'a, 'b> = VerboseError<ParseInput<'a, 'b>>;
 pub(crate) type FinalParseError<'a> = VerboseError<LocatedSpan<&'a str>>;
 
@@ -303,11 +303,11 @@ fn split_at_char_index(input: &str, index: usize) -> (&str, &str, &str) {
     (before, target, after)
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct TranslationUnit<T> {
     pub inner: T,
-    pub arena: arena::StrArena,
-    pub main: Option<arena::Id>,
+    pub arena: intern::StrInterner,
+    pub main: Option<intern::InternedStr>,
 }
 
 #[derive(Debug, Default)]
@@ -411,7 +411,7 @@ pub(crate) enum Literal {
     Tuple(Vec<Op>),
 }
 
-pub(crate) type Identifier = arena::Id;
+pub(crate) type Identifier = intern::InternedStr;
 
 fn to_identstr(value: ParseInput) -> Identifier {
     let mut arena = value.extra.borrow_mut();

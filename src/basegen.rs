@@ -1,7 +1,7 @@
 
 
 use std::{fmt, collections::HashMap};
-use crate::{parser::{Literal, OpKind, Op, Span, Identifier, TranslationUnit, ParsedItems, TypeDef}, diagnostic::Diagnostic, arch::Intrinsic, arena};
+use crate::{parser::{Literal, OpKind, Op, Span, Identifier, TranslationUnit, ParsedItems, TypeDef}, diagnostic::Diagnostic, arch::Intrinsic, intern};
 
 pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Result<TranslationUnit<BaseProgram<I>>, CodegenError> {
 
@@ -91,7 +91,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
             },
 
             OpKind::Call { name }  => {
-                let inrinsic = I::basegen(&*state.arena.get(name));
+                let inrinsic = I::basegen(&*state.arena.get(&name));
                 let result = match inrinsic {
                     Some(val) => InstrKind::Intrinsic(val),
                     None => InstrKind::Call { to: name }
@@ -286,7 +286,7 @@ pub(crate) enum Producer {
 struct State<'a, I> {
     pub bytecode: Vec<Instr<I>>,
     pub counter: usize,
-    pub arena: &'a arena::StrArena
+    pub arena: &'a intern::StrInterner
 }
 
 impl<'a, I> State<'a, I> {
@@ -317,10 +317,10 @@ pub(crate) enum CommonIdentifier {
 }
 
 impl CommonIdentifier {
-    fn get<'a>(&self, arena: &'a arena::StrArena) -> &'a str {
+    fn get<'a>(&self, arena: &'a intern::StrInterner) -> &'a str {
         match self {
             CommonIdentifier::Common(val) => val,
-            CommonIdentifier::Runtime(val) => arena.get(*val)
+            CommonIdentifier::Runtime(val) => arena.get(val)
         }
     }
 }

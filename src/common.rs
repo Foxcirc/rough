@@ -1,6 +1,7 @@
 
 use std::{alloc, mem, ptr, collections::HashMap, slice};
-use crate::arena;
+
+use crate::intern;
 
 // todo: Pointers have to be stored with the same 64 bit size as the compiled version,
 //       so a pointer is like (u32: MemoryId, u32: Index)
@@ -105,7 +106,7 @@ pub(crate) enum MemoryError {
 
 
 pub(crate) struct CommonState<'a> {
-    pub arena: &'a arena::StrArena,
+    pub arena: &'a intern::StrInterner,
     pub memory: Memory,
     pub stack: MemoryPtr,
 }

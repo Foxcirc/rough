@@ -3,7 +3,7 @@
 pub(crate) mod test;
 
 pub mod diagnostic;
-pub mod arena;
+pub mod intern;
 pub mod parser;
 pub mod basegen;
 pub mod common;
@@ -19,7 +19,7 @@ use parser::TranslationUnit;
 
 fn main() {
 
-    // todo: set alloc-error-hook
+    // todo: set alloc-error-hook (yes, this MAY BE useful, because at comptime one might allocate a lot of bytes, => but it could also be handeled at the allocation site??)
     
     let opts = match cli::parse(env::args()) {
         Err(err) => {
@@ -57,6 +57,7 @@ fn main() {
         executor: async_executor::Executor::new(),
         cache: async_lock::RwLock::new(HashMap::new()),
         rio: rio::new().expect("create io_uring context"),
+        // rio: { rio::Config { print_profile_on_drop: true, depth: 1, ..Default::default() } }.start().expect("create io_uring context"),
     });
 
     // asynchronously compile the program
@@ -214,13 +215,17 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             Diagnostic::debug(format!("compiling module `{}`", module_name)).emit();
         }
 
-        let content = match async_read_to_string(&path, &shared.rio).await {
-            Ok(val) => val,
-            Err(diag) => {
-                diag.note(format!("module `{}`", module_name)).emit();
-                return Err(())
-            }
-        };
+        // let s = std::time::Instant::now();
+        // let content = match async_read_to_string(&path, &shared.rio).await {
+        //     Ok(val) => val,
+        //     Err(diag) => {
+        //         diag.note(format!("module `{}`", module_name)).emit();
+        //         return Err(())
+        //     }
+        // };
+        // println!("{:?}", std::time::Instant::now() - s);
+
+        let content = std::fs::read_to_string(&path).unwrap();
 
         let source = match parser::parse(&content) {
             Ok(val) => val,
@@ -236,7 +241,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
 
         for module in source.inner.uses.iter() {
 
-            let module_path = path.with_file_name("").join(source.arena.get(module.path));
+            let module_path = path.with_file_name("").join(source.arena.get(&module.path));
 
             // compile the module (caching handeled inside compile)
             let fut = shared.executor.spawn(compile::<I>(Arc::clone(&shared), module_path.clone()));
