@@ -56,7 +56,7 @@ fn main() {
         opts,
         executor: async_executor::Executor::new(),
         cache: async_lock::RwLock::new(HashMap::new()),
-        rio: rio::new().expect("create io_uring context"),
+        io: uring_fs::IoUring::new().expect("create io_uring context"),
         // rio: { rio::Config { print_profile_on_drop: true, depth: 1, ..Default::default() } }.start().expect("create io_uring context"),
     });
 
@@ -215,17 +215,13 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
             Diagnostic::debug(format!("compiling module `{}`", module_name)).emit();
         }
 
-        // let s = std::time::Instant::now();
-        // let content = match async_read_to_string(&path, &shared.rio).await {
-        //     Ok(val) => val,
-        //     Err(diag) => {
-        //         diag.note(format!("module `{}`", module_name)).emit();
-        //         return Err(())
-        //     }
-        // };
-        // println!("{:?}", std::time::Instant::now() - s);
-
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = match read_to_string(&path, &shared.io).await {
+            Ok(val) => val,
+            Err(diag) => {
+                diag.note(format!("module `{}`", module_name)).emit();
+                return Err(())
+            }
+        };
 
         let source = match parser::parse(&content) {
             Ok(val) => val,
@@ -311,40 +307,25 @@ fn split_path(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
     Some((path.parent()?.to_path_buf(), path.file_name()?.to_os_string()))
 }
 
-async fn async_read_to_string(path: &path::Path, rio: &rio::Rio) -> Result<String, Diagnostic> {
+async fn read_to_string(path: &path::Path, io: &uring_fs::IoUring) -> Result<String, Diagnostic> {
 
-    let file = match fs::File::open(&path) {
+    let file = match unsafe { io.open(path, uring_fs::OpenOptions::READ).await } {
         Ok(val) => val,
         Err(err) => {
-            return Err(Diagnostic::error("cannot open module")
+            return Err(Diagnostic::error("cannot open file")
                 .note(err.to_string().to_lowercase()))
         }
     };
 
-    let mut buf = Vec::new();
-    let mut to_read = 1024;
-    let mut total_bytes_read = 0;
-    loop {
-        let len = buf.len();
-        buf.resize(len + to_read, 0);
-        let bytes_read = match rio.read_at(&file, &mut (&mut buf[len..len + to_read]), total_bytes_read as u64).await { // todo: why the fuck does this take a ref and not a mut ref (as iov), tho i am giving it &mut here just to be sure
-            Ok(val) => val,
-            Err(err) => {
-                return Err(Diagnostic::error("cannot read file")
-                    .note(err.to_string().to_lowercase()))
-            }
-        };
-        buf.truncate(len + bytes_read);
-        to_read *= 2;
-        total_bytes_read += bytes_read;
-        if bytes_read == 0 { break }
-    }
-
-    match String::from_utf8(buf) {
+    match io.read_to_string(&file).await {
         Ok(val) => Ok(val),
+        Err(err) if uring_fs::is_not_utf8(&err) => {
+            Err(Diagnostic::error("file is not utf8")
+                .note(err.to_string().to_lowercase()))
+        }
         Err(err) => {
-            return Err(Diagnostic::error("invalid utf8")
-                .note(format!("valid up to byte {}", err.utf8_error().valid_up_to())))
+            Err(Diagnostic::error("cannot read file")
+                .note(err.to_string().to_lowercase()))
         }
     }
 
@@ -354,7 +335,7 @@ struct SharedState<'a, I: Send + Sync> {
     pub opts: cli::Opts,
     pub executor: async_executor::Executor<'a>,
     pub cache: async_lock::RwLock<HashMap<path::PathBuf, CompilationState<I>>>,
-    pub rio: rio::Rio,
+    pub io: uring_fs::IoUring,
 }
 
 enum CompilationState<I> {
@@ -391,7 +372,7 @@ pub(crate) mod arch {
 
     pub(crate) trait Intrinsic: Clone + PartialEq + Eq { // todo: remove clone bound
         fn basegen(name: &str) -> Option<Self> where Self: Sized;
-        fn typegen(&self, state: &mut typegen::State);
+        fn typegen(&self, state: &mut typegen::State<Self>);
     }
 
     #[derive(Debug, PartialEq, Eq, Clone)] // todo: clean up all derives everywhere
@@ -414,7 +395,7 @@ pub(crate) mod arch {
                 _other => None,
             }
         }
-        fn typegen(&self, state: &mut typegen::State) {
+        fn typegen(&self, state: &mut typegen::State<Self>) {
             todo!("typecheck Intel64 intrinsic")
         }
     }

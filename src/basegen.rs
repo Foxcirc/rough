@@ -1,14 +1,14 @@
 
 
 use std::{fmt, collections::HashMap};
-use crate::{parser::{Literal, OpKind, Op, Span, Identifier, TranslationUnit, ParsedItems, TypeDef}, diagnostic::Diagnostic, arch::Intrinsic, intern};
+use crate::{parser::{Literal, OpKind, Op, Span, Identifier, TranslationUnit, ParsedItems, TypeDef}, diagnostic::Diagnostic, arch::Intrinsic, intern, typegen::TypeId};
 
 pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Result<TranslationUnit<BaseProgram<I>>, CodegenError> {
 
     let mut part = TranslationUnit {
         inner: BaseProgram {
             funs: HashMap::with_capacity(source.inner.funs.len()),
-            types: HashMap::with_capacity(source.inner.types.len())
+            newtypes: HashMap::with_capacity(source.inner.types.len())
         },
         arena: source.arena,
         main: source.main
@@ -31,7 +31,7 @@ pub(crate) fn basegen<I: Intrinsic>(source: TranslationUnit<ParsedItems>) -> Res
             signature: signature_state.bytecode,
         };
 
-        part.inner.types.insert(item.name, fun);
+        part.inner.newtypes.insert(item.name, fun);
     
     }
 
@@ -187,7 +187,7 @@ fn codegen_block<I: Intrinsic>(state: &mut State<I>, block: Vec<Op>, loop_escape
 pub(crate) enum InstrLiteral {
     Int(usize),
     Bool(bool),
-    Type(TypeFull),
+    Type(TypeId),
     Str(String),
 }
 
@@ -298,7 +298,7 @@ impl<'a, I> State<'a, I> {
 
 pub(crate) struct BaseProgram<I> {
     pub funs: HashMap<Identifier, FunWithMetadata<I>>,
-    pub types: HashMap<Identifier, TypeWithMetadata<I>>,
+    pub newtypes: HashMap<Identifier, TypeWithMetadata<I>>,
 }
 
 // cannot derive Default because of the generics
@@ -306,7 +306,7 @@ impl<I> Default for BaseProgram<I> {
     fn default() -> Self {
         Self {
             funs: HashMap::new(),
-            types: HashMap::new(),
+            newtypes: HashMap::new(),
         }
     }
 }
@@ -327,7 +327,7 @@ impl CommonIdentifier {
 
 pub(crate) struct Program<I> {
     pub funs: HashMap<Identifier, FunWithMetadata<I>>,
-    pub types: HashMap<Identifier, TypeWithMetadata<I>>,
+    pub newtypes: HashMap<Identifier, TypeWithMetadata<I>>,
 }
 
 pub(crate) type Bytecode<I> = Vec<Instr<I>>;
@@ -350,47 +350,6 @@ pub(crate) struct FunWithMetadata<I> { // todo: rename to basegenFun
 #[derive(Debug, Clone)]
 pub(crate) struct TypeWithMetadata<I> { // todo: rename to basegenFun
     pub signature: Bytecode<I>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct TypeFull {
-    pub comptime: bool,
-    pub t: Type,
-}
-
-impl TypeFull {
-    pub fn runtime(t: Type) -> Self {
-        Self { comptime: false, t }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Type {
-    // special type used for typechecking, not to the same as `any` inside signatures
-    // Any,
-    // the type of types
-    Type,
-    // standard types
-    Int,
-    Bool,
-    // todo: use Rc to store something like Ptr so cloning is cheap
-    // Char,
-    // Ptr { inner: Box<Type> }, // todo: add slice type
-    // Slice { ptr: Box<Type>, len: usize },
-    // fine-grained integer types
-    // U8,
-    // U16,
-    // U32,
-    // U64,
-    // I8,
-    // I16,
-    // I32,
-    // I64,
-    // type
-    // Type,
-    // complex types
-    // Array { inner: Box<Type>, len: usize },
-    // Tuple { inner: Vec<Type> },
 }
 
 pub(crate) struct CodegenError {

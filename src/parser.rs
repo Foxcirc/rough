@@ -2,7 +2,7 @@
 use nom::{branch::alt, multi::{many0, many1, fold_many0}, sequence::{pair, delimited, preceded, terminated, tuple}, bytes::complete::{tag, escaped_transform, is_not, take_until}, combinator::{not, map, recognize, eof, value, cut, verify, peek, map_res, opt}, character::complete::{char, alpha1, alphanumeric1, multispace0, one_of, multispace1}, error::{context, VerboseErrorKind, VerboseError}, IResult, Finish};
 use nom_locate::LocatedSpan;
 use std::cell::RefCell;
-use crate::{diagnostic::{self, Diagnostic}, intern, basegen::{TypeFull, Type}};
+use crate::{diagnostic::{self, Diagnostic}, intern, typegen::{BuiltinType, TypeId}};
 
 pub(crate) fn parse<'d>(dat: &'d str) -> Result<TranslationUnit<ParsedItems>, FinalParseError<'d>> {
     let interner = RefCell::new(intern::StrInterner::new());
@@ -150,8 +150,8 @@ pub(crate) fn parse_op<'a, 'b>(dat: ParseInput<'a, 'b>) -> ParseResult<'a, 'b, O
                 value(OpKind::Lte, terminated(tag("lte"), multispace1)),
             )),
             alt((
-               value(OpKind::Push { value: Literal::Type(TypeFull::runtime(Type::Int)) },  terminated(tag("int"), multispace1)),
-               value(OpKind::Push { value: Literal::Type(TypeFull::runtime(Type::Bool)) }, terminated(tag("bool"), multispace1)),
+               value(OpKind::Push { value: Literal::Type(BuiltinType::Int.into()) },  terminated(tag("int"), multispace1)),
+               value(OpKind::Push { value: Literal::Type(BuiltinType::Bool.into()) },  terminated(tag("bool"), multispace1)),
             )),
             alt((
                 map(preceded(pair(tag("if"),   multispace1), cut(parse_block)), |block| OpKind::If   { block }),
@@ -407,7 +407,7 @@ pub(crate) enum Literal {
     Int(usize),
     Bool(bool),
     Str(String), // owned String because we already processed escape sequences
-    Type(TypeFull),
+    Type(TypeId),
     Tuple(Vec<Op>),
 }
 

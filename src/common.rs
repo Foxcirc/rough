@@ -128,7 +128,7 @@ impl<'a> CommonState<'a> {
     }
 
     /// Shorten the stack by `size`
-    /// Inside a debug build this still checks if the new pointer is valid to prevent the error
+    /// Inside a debug build this still checks if the new pointer is valid to prevent an accessing error
     /// from occuring later
     #[track_caller]
     pub fn shrink_by(&mut self, size: usize) {
@@ -280,7 +280,7 @@ impl<'a> CommonState<'a> {
 
     }
 
-    /// Pushes the 0th tuple values onto the stack first
+    /// Pushes the 0th tuple value onto the stack first
     #[track_caller]
     pub fn math_op_2(&mut self, op: impl FnOnce(usize, usize) -> (usize, usize)) {
 

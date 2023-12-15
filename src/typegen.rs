@@ -1,13 +1,12 @@
 
-use std::cell::{RefCell, RefMut};
-
-use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral, Type, TypeFull}, parser::{Span, TranslationUnit}, arch::Intrinsic, diagnostic::Diagnostic, eval, common::{self, CommonState}};
+use std::{cell::{RefCell, RefMut}, collections::HashMap};
+use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Identifier}, arch::Intrinsic, diagnostic::Diagnostic, eval, common::{self, CommonState}, intern};
 
 pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
     let mut part = TranslationUnit {
         inner: Program {
-            funs: Default::default(), types: Default::default(),
+            funs: Default::default(), newtypes: Default::default(),
         },
         arena: base_program.arena,
         main: base_program.main,
@@ -26,7 +25,7 @@ pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>
             stack,
         },
         items: Vec::new(),
-        // types: &base_program.inner.types,
+        typemap: TypeMap::new(),
     };
 
     let cell = RefCell::new(state);
@@ -41,14 +40,15 @@ pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>
     state.common.memory.dealloc(state.common.stack).expect("deallocate stack memory");
     assert!(state.common.memory.allocations() == 0, "some memory was leaked"); // todo: also assert this in eval
 
+    // todo: remove the below codeeeeee
     part.inner.funs = base_program.inner.funs;
-    part.inner.types = base_program.inner.types;
+    part.inner.newtypes = base_program.inner.newtypes;
 
     Ok(part)
 
 }
 
-fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) -> Result<(), TypeError> {
+fn typecheck_fun<I: Intrinsic>(state: &RefCell<State<I>>, fun: FunWithMetadata<I>) -> Result<(), TypeError> {
 
     // todo: push signature onto the stack
     
@@ -58,7 +58,9 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
             InstrKind::Label { .. } => (),
 
-            InstrKind::Push { value } => state.borrow_mut().push(Item::literal(value)),
+            InstrKind::Push { value: InstrLiteral::Int(num) } => state.borrow_mut().push(Item::comptime(BuiltinType::Int.into(), usize::to_rh(num))),
+            // InstrKind::Push { value: InstrLiteral::Bool(val) } => state.borrow_mut().push(Item::comptime(TypeMap::builtin_id(BuiltinType::Bool), todo!())),
+            InstrKind::Push { .. } => todo!(),
 
             InstrKind::Call { to } => todo!(),
             InstrKind::Return => return Ok(()),
@@ -71,7 +73,8 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
             InstrKind::Rot4 => state.borrow_mut().rot4()?,
 
             InstrKind::Read  => {
-                println!("{:?}", state.borrow_mut().items.iter().map(|it| &it.t).collect::<Vec<_>>())
+                // debug types
+                println!("{:?}", state.borrow_mut().items.iter().map(|it| &it.typeid).collect::<Vec<_>>())
             },
             InstrKind::Move  => todo!(),
             InstrKind::Write => todo!(),
@@ -118,36 +121,124 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State>, fun: FunWithMetadata<I>) 
 
 }
 
-// very similar to the state in eval
-pub(crate) struct State<'a> {
-    common: common::CommonState<'a>,
-    pub items: Vec<TypeFull>,
+pub(crate) type TypeId = u64;
+
+pub(crate) struct TypeData<I> {
+    pub funs: HashMap<Identifier, FunWithMetadata<I>>,
 }
 
-impl<'a> State<'a> {
+pub(crate) struct TypeMap<I> {
+    typedata: HashMap<Identifier, (TypeId, TypeData<I>)>, // user defined types
+    next: u64,
+}
 
-    pub fn push(&mut self, item: Item<Option<Vec<u8>>>) {
-        let size = 8; // todo: use actual size of t
-        self.items.push(item.metadata);
-        self.common.push(item.v.unwrap_or(vec![0; size]));
+impl<I> TypeMap<I> {
+    pub fn new() -> Self {
+        Self {
+            typedata: HashMap::new(),
+            next: BuiltinType::next(),
+        }
+    }
+    pub fn get(&self, name: Identifier) -> Option<&(TypeId, TypeData<I>)> {
+        self.typedata.get(&name)
+    }
+    pub fn insert(&mut self, name: Identifier, value: TypeData<I>) {
+        self.next += 1;
+        let id = self.next;
+        self.typedata.insert(name, (id, value));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum BuiltinType {
+    Int,
+    Bool
+}
+
+impl BuiltinType {
+    pub fn next() -> TypeId {
+        3
+    }
+    pub fn size(&self) -> usize {
+        let size: u32 = match self {
+            Self::Int => 8,
+            Self::Bool => 1,
+        };
+        size as usize
+    }
+}
+
+impl From<BuiltinType> for TypeId {
+    fn from(value: BuiltinType) -> Self {
+        match value {
+            BuiltinType::Int => 1,
+            BuiltinType::Bool => 2,
+        }
+    }
+}
+
+impl From<TypeId> for BuiltinType {
+    fn from(value: TypeId) -> Self {
+        match value {
+            1 => BuiltinType::Int,
+            2 => BuiltinType::Bool,
+            _ => unreachable!()
+        }
+    }
+}
+
+/// comptime data for a value
+#[derive(Clone)]
+pub(crate) struct ComptimeInfo {
+    typeid: TypeId,
+    comptime: bool,
+    data: Vec<u8>,
+}
+
+impl ComptimeInfo {
+    pub const fn minimal(typeid: TypeId, comptime: bool) -> Self {
+        Self { typeid, comptime, data: Vec::new() }
+    }
+}
+
+// very similar to the state in eval
+pub(crate) struct State<'a, I> {
+    common: common::CommonState<'a>,
+    pub items: Vec<ComptimeInfo>,
+    typemap: TypeMap<I>,
+}
+
+impl<'a, I> State<'a, I> {
+
+    pub fn push(&mut self, item: Item) {
+        let data = if item.data.is_empty() {
+            let size = BuiltinType::from(item.info.typeid).size();
+            let mut data = Vec::with_capacity(size);
+            data.resize(size, 0);
+            data
+        } else {
+            item.data
+        };
+        self.common.push(data);
+        self.items.push(item.info);
     }
 
     /// Peek at the top most stack item
-    pub fn peek(&self, sub: usize) -> Option<&TypeFull> {
+    pub fn peek(&self, sub: usize) -> Option<&ComptimeInfo> {
         let len = self.items.len();
         self.items.get(len - sub - 1)
     }
 
-    pub fn pop(&mut self) -> Option<Item<Option<Vec<u8>>>> {
+    pub fn pop(&mut self) -> Option<Item> {
         // if the item is not comptime it will be `None`
-        let md = self.items.pop()?;
+        let info = self.items.pop()?;
         let size = 8; /* todo: use the actual size of the type */
-        let data = self.common.pop(size);
-        match md.comptime {
-            true  => Some(Item { metadata: md, v: Some(data) }),
-            false => Some(Item { metadata: md, v: None })
+        let data = self.common.pop(size); // todo: maybe for non-comptime types we dont need to pop any data here??
+        if info.comptime {
+            Some(Item { info, data })
+        } else {
+            Some(Item { info, data: Vec::new() })
         }
-        
     }
 
     /// Discards `n` values from the top of the stack
@@ -167,7 +258,7 @@ impl<'a> State<'a> {
     /// Duplicates the element ontop of the stack
     pub fn dup(&mut self) -> Result<(), TypeError> {
         let item = self.items.last().ok_or(TypeError::unspecified())?;
-        let size = 8; // todo: use item1 actual size of t
+        let size = BuiltinType::from(item.typeid).size();
         self.items.push(item.clone());
         self.common.dup(size); // perform the actual dup
         Ok(())
@@ -177,10 +268,10 @@ impl<'a> State<'a> {
     /// E.g (A B -> A B A)
     pub fn over(&mut self) -> Result<(), TypeError> {
         let len = self.items.len();
-        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
-        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
-        let size1 = 8; // todo: use item1 actual size of t
-        let size2 = 8; // todo: use item2 actual size of t
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?;
+        let size1 = BuiltinType::from(item1.typeid).size();
+        let size2 = BuiltinType::from(item2.typeid).size();
         let duplicate = self.items.get(len - 2).ok_or(TypeError::unspecified())?;
         self.items.push(duplicate.clone());
         self.common.over(size1, size2); // perform the actual over
@@ -190,10 +281,10 @@ impl<'a> State<'a> {
     /// Swaps the two elements ontop of the stack
     pub fn swap(&mut self) -> Result<(), TypeError> {
         let len = self.items.len();
-        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
-        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
-        let size1 = 8; // todo: use item1 actual size of t
-        let size2 = 8; // todo: use item2 actual size of t
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?;
+        let size1 = BuiltinType::from(item1.typeid).size();
+        let size2 = BuiltinType::from(item2.typeid).size();
         self.items.swap(len - 1, len - 2);
         self.common.swap(size1, size2); // perform the actual swap
         Ok(())
@@ -203,12 +294,12 @@ impl<'a> State<'a> {
     // A B C => B C A
     pub fn rot3(&mut self) -> Result<(), TypeError> {
         let len = self.items.len();
-        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
-        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
-        let item3 = &self.items.get(len - 3).ok_or(TypeError::unspecified())?.t;
-        let size1 = 8; // todo: use item1 actual size of t
-        let size2 = 8; // todo: use item2 actual size of t
-        let size3 = 8; // todo: use item2 actual size of t
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?;
+        let item3 = &self.items.get(len - 3).ok_or(TypeError::unspecified())?;
+        let size1 = BuiltinType::from(item1.typeid).size();
+        let size2 = BuiltinType::from(item2.typeid).size();
+        let size3 = BuiltinType::from(item3.typeid).size();
         self.items[len - 3 .. len].rotate_left(1);
         self.common.rot3(size1, size2, size3); // perform the actual rotation (rot3)
         Ok(())
@@ -218,14 +309,14 @@ impl<'a> State<'a> {
     // A B C D => B C D A
     pub fn rot4(&mut self) -> Result<(), TypeError> {
         let len = self.items.len();
-        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?.t;
-        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?.t;
-        let item3 = &self.items.get(len - 3).ok_or(TypeError::unspecified())?.t;
-        let item4 = &self.items.get(len - 4).ok_or(TypeError::unspecified())?.t;
-        let size1 = 8; // todo: use item1 actual size of t
-        let size2 = 8; // todo: use item2 actual size of t
-        let size3 = 8; // todo: use item2 actual size of t
-        let size4 = 8; // todo: use item2 actual size of t
+        let item1 = &self.items.get(len - 1).ok_or(TypeError::unspecified())?;
+        let item2 = &self.items.get(len - 2).ok_or(TypeError::unspecified())?;
+        let item3 = &self.items.get(len - 3).ok_or(TypeError::unspecified())?;
+        let item4 = &self.items.get(len - 4).ok_or(TypeError::unspecified())?;
+        let size1 = BuiltinType::from(item1.typeid).size();
+        let size2 = BuiltinType::from(item2.typeid).size();
+        let size3 = BuiltinType::from(item3.typeid).size();
+        let size4 = BuiltinType::from(item4.typeid).size();
         self.items[len - 4 .. len].rotate_left(1);
         self.common.rot4(size1, size2, size3, size4); // perform the actual rotation (rot4)
         Ok(())
@@ -234,22 +325,21 @@ impl<'a> State<'a> {
     /// A general wrapper for a builtin math operation of
     /// the signature (int int -> int)
     fn math_op_1(&mut self, op: impl FnOnce(usize, usize) -> usize) -> Result<(), TypeError> {
-        let md1 = self.peek(0).ok_or(TypeError::unspecified())?;
-        let md2 = self.peek(1).ok_or(TypeError::unspecified())?;
-        let size = 8; // todo: use actual size of t, both values will be the same size
-        if md1.t != Type::Int ||
-           md2.t != Type::Int {
-            return Err(TypeError::expect_types(vec![Type::Int], vec![md1.clone(), md2.clone()]))
+        let item1 = self.peek(0).ok_or(TypeError::unspecified())?;
+        let item2 = self.peek(1).ok_or(TypeError::unspecified())?;
+        if item1.typeid != BuiltinType::Int.into() ||
+           item2.typeid != BuiltinType::Int.into() {
+            return Err(TypeError::expect_types(vec![BuiltinType::Int, BuiltinType::Int], vec![item1.clone(), item2.clone()]))
         }
         // comptime or runtime
-        if md1.comptime && md2.comptime {
-            let len = self.items.len();
-            self.items.truncate(len - 2);
+        if item1.comptime && item2.comptime {
             self.common.math_op_1(op);
-            self.items.push(TypeFull { comptime: true, t: Type::Int })
+            self.items.truncate(self.items.len() - 2);
+            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), true));
         } else {
-            self.shrink_by(2);
-            self.push(Item::runtime(Type::Int));
+            self.common.shrink_by(8 * 2); // todo: use actual size
+            self.items.truncate(self.items.len() - 2);
+            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), false));
         }
         Ok(())
     }
@@ -257,20 +347,24 @@ impl<'a> State<'a> {
     /// A general wrapper for a builtin math operation of
     /// the signature (int int -> int int)
     fn math_op_2(&mut self, op: impl FnOnce(usize, usize) -> (usize, usize)) -> Result<(), TypeError> {
-        let md1 = self.peek(0).ok_or(TypeError::unspecified())?;
-        let md2 = self.peek(1).ok_or(TypeError::unspecified())?;
-        let size = 8; // todo: use actual size of t, both values will be the same size
-        if md1.t != Type::Int ||
-           md2.t != Type::Int {
-            return Err(TypeError::expect_types(vec![Type::Int], vec![md1.clone(), md2.clone()]))
+        let item1 = self.peek(0).ok_or(TypeError::unspecified())?;
+        let item2 = self.peek(1).ok_or(TypeError::unspecified())?;
+        // let size1 = self.typemap.size_by_typeid(&item1.typeid);
+        if item1.typeid != BuiltinType::Int.into() ||
+           item2.typeid != BuiltinType::Int.into() {
+            return Err(TypeError::expect_types(vec![BuiltinType::Int, BuiltinType::Int], vec![item1.clone(), item2.clone()]))
         }
         // comptime or runtime
-        if md1.comptime && md2.comptime {
+        if item1.comptime && item2.comptime {
             self.common.math_op_2(op);
+            self.items.truncate(self.items.len() - 2);
+            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), true));
+            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), true));
         } else {
-            self.shrink_by(2);
-            self.push(Item::runtime(Type::Int));
-            self.push(Item::runtime(Type::Int));
+            self.common.shrink_by(8 * 2); // todo: use actual size
+            self.items.truncate(self.items.len() - 2);
+            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), false));
+            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), false));
         }
         Ok(())
     }
@@ -293,55 +387,66 @@ impl<'a> State<'a> {
 
 }
 
+// a value that was popped from the stack
+// and it's associated comptime data
 #[derive(Clone)]
-pub(crate) struct Item<T> {
-    pub metadata: TypeFull,
-    v: T, // use tinyvec / stackvec
+pub(crate) struct Item {
+    pub info: ComptimeInfo,
+    data: Vec<u8>, // todo: use tinyvec / stackvec for Vec<u8>
 }
 
-impl Item<Option<Vec<u8>>> {
-    pub fn literal(literal: InstrLiteral) -> Self {
-        match literal {
-            InstrLiteral::Int(val) => Self::comptime(Type::Int, usize::to_rh(val)), // layout of usize
-            InstrLiteral::Bool(_val) => todo!("bool literal"), // layout of u8
-            InstrLiteral::Type(_val) => todo!("type literal"), // layout of (u8 'comptime, u32 'discriminant, usize 'data) todo: use a typeId!!!
-            InstrLiteral::Str(_val) => todo!("implement str literals as implicit statics as ptr of char")
-        }
+impl Item {
+    pub const fn comptime(typeid: TypeId, data: Vec<u8>) -> Self {
+        Self { info: ComptimeInfo::minimal(typeid, true), data }
+    }
+    pub const fn runtime(typeid: TypeId) -> Self {
+        Self { info: ComptimeInfo::minimal(typeid, false), data: Vec::new() }
     }
 }
 
-impl<T> Item<Option<T>> {
-    pub const fn comptime(t: Type, v: T) -> Self {
-        Self { metadata: TypeFull { comptime: true, t }, v: Some(v) }
-    }
-    pub const fn runtime(t: Type) -> Self {
-        Self { metadata: TypeFull { comptime: false, t }, v: None }
-    }
-}
+// calling native rust functions from within rh
 
 pub(crate) trait FromRh {
-    const TYPE: Type;
+    const TYPE: BuiltinType;
     fn from_rh(rh: Vec<u8>) -> Self;
 }
 
-impl FromRh for usize { // todo: use RhInt
-    const TYPE: Type = Type::Int;
-    fn from_rh(rh: Vec<u8>) -> Self {
-        usize::from_ne_bytes(rh.try_into().expect("convert to rust usize"))
-    }
-}
-
 pub(crate) trait ToRh {
-    const TYPE: Type;
+    const TYPE: BuiltinType;
     fn to_rh(rh: Self) -> Vec<u8>;
 }
 
-impl ToRh for usize { // todo: use RhInt
-    const TYPE: Type = Type::Int;
-    fn to_rh(rh: Self) -> Vec<u8> {
-        Vec::from(rh.to_ne_bytes())
-    }
+macro_rules! impl_from_rh {
+    ($name: ident, $t: expr, $input:ident, $body: expr) => {
+        impl FromRh for $name {
+            const TYPE: BuiltinType = $t;
+            fn from_rh($input: Vec<u8>) -> Self { $body }
+        }
+    };
 }
+
+macro_rules! impl_to_rh {
+    ($name: ident, $t: expr, $input:ident, $body: expr) => {
+        impl ToRh for $name {
+            const TYPE: BuiltinType = $t;
+            fn to_rh($input: Self) -> Vec<u8> { $body }
+        }
+    };
+}
+
+impl_from_rh!(bool, BuiltinType::Bool, input, {
+    *input.get(0).unwrap() > 0
+});
+impl_from_rh!(usize, BuiltinType::Int, input, {
+    usize::from_ne_bytes(input.try_into().unwrap())
+});
+
+impl_to_rh!(usize, BuiltinType::Int, input, {
+    Vec::from(input.to_ne_bytes())
+});
+impl_to_rh!(bool, BuiltinType::Bool, input, {
+    Vec::from([input as u8])
+});
 
 pub(crate) struct TypeError {
     kind: TypeErrorKind,
@@ -358,13 +463,13 @@ impl TypeError {
     pub(crate) fn unspecified() -> Self {
         Self::unspanned(TypeErrorKind::Unspecified)
     }
-    pub(crate) fn expect_types(want: Vec<Type>, got: Vec<TypeFull>) -> Self {
+    pub(crate) fn expect_types(want: Vec<BuiltinType>, got: Vec<ComptimeInfo>) -> Self {
         Self::unspanned(TypeErrorKind::Expect {
-            want: want.into_iter().map(|t| TypeFull { comptime: false, t }).collect(),
+            want: want.into_iter().map(|t| ComptimeInfo::minimal(t.into(), false)).collect(),
             got
         })
     }
-    pub(crate) fn expect_metadata(want: Vec<TypeFull>, got: Vec<TypeFull>) -> Self {
+    pub(crate) fn expect(want: Vec<ComptimeInfo>, got: Vec<ComptimeInfo>) -> Self {
         Self::unspanned(TypeErrorKind::Expect { want, got })
     }
 }
@@ -374,7 +479,7 @@ pub(crate) enum TypeErrorKind {
     UnknownFn { name: String },
     BranchesNotEmpty,
     BranchesNotEqual,
-    Expect { want: Vec<TypeFull>, got: Vec<TypeFull> },
+    Expect { want: Vec<ComptimeInfo>, got: Vec<ComptimeInfo> },
 }
 
 pub(crate) fn format_error(value: TypeError) -> Diagnostic {
@@ -399,10 +504,10 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
     diag
 }
 
-fn format_metadata(mds: Vec<TypeFull>) -> String {
+fn format_metadata(mds: Vec<ComptimeInfo>) -> String {
     format!("{:?}", mds.into_iter().map(|it| {
-        if it.comptime { format!("comptime {:?}", it.t) }
-        else { format!("{:?}", it.t) }
+        if it.comptime { format!("comptime id {:?}", BuiltinType::from(it.typeid)) } // todo: format using actual names
+        else { format!("id {:?}", BuiltinType::from(it.typeid)) }
     }).collect::<Vec<_>>())
 }
 
