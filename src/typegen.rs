@@ -58,8 +58,8 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State<I>>, fun: FunWithMetadata<I
 
             InstrKind::Label { .. } => (),
 
-            InstrKind::Push { value: InstrLiteral::Int(num) } => state.borrow_mut().push(Item::comptime(BuiltinType::Int.into(), usize::to_rh(num))),
-            // InstrKind::Push { value: InstrLiteral::Bool(val) } => state.borrow_mut().push(Item::comptime(TypeMap::builtin_id(BuiltinType::Bool), todo!())),
+            InstrKind::Push { value: InstrLiteral::Int(num) } => state.borrow_mut().push(Item::comptime(BuiltinType::Int.into(), usize_to_bytes(num))),
+            InstrKind::Push { value: InstrLiteral::Bool(val) } => state.borrow_mut().push(Item::comptime(BuiltinType::Bool.into(), bool_to_bytes(val))),
             InstrKind::Push { .. } => todo!(),
 
             InstrKind::Call { to } => todo!(),
@@ -404,49 +404,21 @@ impl Item {
     }
 }
 
-// calling native rust functions from within rh
-
-pub(crate) trait FromRh {
-    const TYPE: BuiltinType;
-    fn from_rh(rh: Vec<u8>) -> Self;
+pub(crate) fn usize_to_bytes(value: usize) -> Vec<u8> {
+    value.to_ne_bytes().to_vec()
 }
 
-pub(crate) trait ToRh {
-    const TYPE: BuiltinType;
-    fn to_rh(rh: Self) -> Vec<u8>;
+pub(crate) fn usize_from_bytes(value: Vec<u8>) -> usize {
+    usize::from_ne_bytes(value.try_into().unwrap())
 }
 
-macro_rules! impl_from_rh {
-    ($name: ident, $t: expr, $input:ident, $body: expr) => {
-        impl FromRh for $name {
-            const TYPE: BuiltinType = $t;
-            fn from_rh($input: Vec<u8>) -> Self { $body }
-        }
-    };
+pub(crate) fn bool_to_bytes(value: bool) -> Vec<u8> {
+    vec![value as u8]
 }
 
-macro_rules! impl_to_rh {
-    ($name: ident, $t: expr, $input:ident, $body: expr) => {
-        impl ToRh for $name {
-            const TYPE: BuiltinType = $t;
-            fn to_rh($input: Self) -> Vec<u8> { $body }
-        }
-    };
+pub(crate) fn bool_from_bytes(value: Vec<u8>) -> bool {
+    value[0] != 0
 }
-
-impl_from_rh!(bool, BuiltinType::Bool, input, {
-    *input.get(0).unwrap() > 0
-});
-impl_from_rh!(usize, BuiltinType::Int, input, {
-    usize::from_ne_bytes(input.try_into().unwrap())
-});
-
-impl_to_rh!(usize, BuiltinType::Int, input, {
-    Vec::from(input.to_ne_bytes())
-});
-impl_to_rh!(bool, BuiltinType::Bool, input, {
-    Vec::from([input as u8])
-});
 
 pub(crate) struct TypeError {
     kind: TypeErrorKind,

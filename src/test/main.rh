@@ -1,5 +1,6 @@
 
 fn main {
     1 2 add ~
+    1024 alloc get-1024-bytes :into-ptr 1024 ptr:copy-slice
 }
 
