@@ -302,5 +302,26 @@ impl<'a> CommonState<'a> {
 
     }
 
+    /// determines the sizes by the rust types passed as closure parameters
+    #[track_caller]
+    pub fn bool_op_1(&mut self, op: impl FnOnce(bool, bool) -> bool) {
+
+        let size = mem::size_of::<bool>();
+        self.stack.add_offset(- (size as isize * 2));
+
+        let slice = self.memory.access_mut(self.stack).expect("access stack memory"); // todo: make access_mut accept a size (length of the returned slice) so bounds checking errors happend directly
+        let (ptr2, rest) = slice.split_at_mut(size);
+        let ptr1 = &rest[..size];
+
+        let item2 = ptr1[0] != 0; // convert to bool
+        let item1 = ptr2[0] != 0; // convert to bool
+        let result = op(item2, item1);
+
+        ptr2[0] = result as u8;
+
+        self.stack.add_offset(size as isize);
+
+    }
+
 }
 

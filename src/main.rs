@@ -6,6 +6,7 @@ pub mod diagnostic;
 pub mod intern;
 pub mod parser;
 pub mod basegen;
+pub mod bridge;
 pub mod common;
 pub mod typegen;
 pub mod eval;

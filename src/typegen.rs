@@ -1,6 +1,6 @@
 
-use std::{cell::{RefCell, RefMut}, collections::HashMap};
-use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral}, parser::{Span, TranslationUnit, Identifier}, arch::Intrinsic, diagnostic::Diagnostic, eval, common::{self, CommonState}, intern};
+use std::{cell::{RefCell, RefMut}, collections::HashMap, iter, convert::identity};
+use crate::{basegen::{BaseProgram, Program, FunWithMetadata, InstrKind, InstrLiteral, Instr}, parser::{Span, TranslationUnit, Identifier}, arch::Intrinsic, diagnostic::Diagnostic, eval, common::{self, CommonState}, intern, bridge::{BridgedCompound, calc}};
 
 pub(crate) fn typegen<I: Intrinsic>(base_program: TranslationUnit<BaseProgram<I>>) -> Result<TranslationUnit<Program<I>>, TypeError> {
 
@@ -58,7 +58,7 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State<I>>, fun: FunWithMetadata<I
 
             InstrKind::Label { .. } => (),
 
-            InstrKind::Push { value: InstrLiteral::Int(num) } => state.borrow_mut().push(Item::comptime(BuiltinType::Int.into(), usize_to_bytes(num))),
+            InstrKind::Push { value: InstrLiteral::Int(num) }  => state.borrow_mut().push(Item::comptime(BuiltinType::Int.into(), usize_to_bytes(num))),
             InstrKind::Push { value: InstrLiteral::Bool(val) } => state.borrow_mut().push(Item::comptime(BuiltinType::Bool.into(), bool_to_bytes(val))),
             InstrKind::Push { .. } => todo!(),
 
@@ -67,7 +67,7 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State<I>>, fun: FunWithMetadata<I
 
             InstrKind::Drop => state.borrow_mut().drop()?,
             InstrKind::Dup  => state.borrow_mut().dup()?,
-            InstrKind::Swap => state.borrow_mut().swap()?,
+            InstrKind::Swap => state.borrow_mut().call(calc::swap)?,
             InstrKind::Over => state.borrow_mut().over()?,
             InstrKind::Rot3 => state.borrow_mut().rot3()?,
             InstrKind::Rot4 => state.borrow_mut().rot4()?,
@@ -87,7 +87,7 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State<I>>, fun: FunWithMetadata<I
 
             InstrKind::Arrow => todo!(),
 
-            InstrKind::Add => state.borrow_mut().add()?,
+            InstrKind::Add => state.borrow_mut().call(calc::add)?,
             InstrKind::Sub => state.borrow_mut().sub()?,
             InstrKind::Mul => state.borrow_mut().mul()?,
             InstrKind::Dvm => state.borrow_mut().dvm()?,
@@ -124,28 +124,90 @@ fn typecheck_fun<I: Intrinsic>(state: &RefCell<State<I>>, fun: FunWithMetadata<I
 pub(crate) type TypeId = u64;
 
 pub(crate) struct TypeData<I> {
-    pub funs: HashMap<Identifier, FunWithMetadata<I>>,
+    pub signature: Vec<Instr<I>>,
+    pub size: usize, // todo: for now the size of only the runtime fields or isiiiit
+    // todo: querying the sizeof<T> should return different values at runtime and at comptime, because at comptime there may be more fields, we still always know what it will return at comptime though
+    // todo: here go the functions etc. etc....
+}
+
+pub(crate) struct BasicTypeData {
+    pub size: usize, // todo: for now the size of only the runtime fields or isiiiit
 }
 
 pub(crate) struct TypeMap<I> {
-    typedata: HashMap<Identifier, (TypeId, TypeData<I>)>, // user defined types
-    next: u64,
+    typelist: HashMap<Identifier, TypeId>, // list of user defined types
+    typedata: HashMap<TypeId, TypeData<I>>, // fields, funs etc.
+    next: u64, // the next type id that would be assigned to a new type
 }
 
 impl<I> TypeMap<I> {
     pub fn new() -> Self {
         Self {
+            typelist: HashMap::new(),
             typedata: HashMap::new(),
-            next: BuiltinType::next(),
+            next: 4, // start after the builtin types
         }
     }
-    pub fn get(&self, name: Identifier) -> Option<&(TypeId, TypeData<I>)> {
-        self.typedata.get(&name)
+    pub fn typeid(&self, name: impl Into<EitherTypeName>) -> Option<TypeId> {
+        match name.into() {
+            EitherTypeName::Builtin(builtin) => match builtin {
+                "type" => Some(1),
+                "int" => Some(2),
+                "bool" => Some(3),
+                other => unreachable!("invalid builtin type: {}", other),
+            },
+            EitherTypeName::Custom(custom) => {
+                self.typelist.get(&custom).copied()
+            }
+        }
     }
-    pub fn insert(&mut self, name: Identifier, value: TypeData<I>) {
-        self.next += 1;
-        let id = self.next;
-        self.typedata.insert(name, (id, value));
+    pub fn typedata(&self, name: impl Into<EitherTypeId>) -> Option<BasicTypeData> {
+        match name.into() {
+            EitherTypeId::Builtin(builtin) => match builtin {
+                "type" => Some(BasicTypeData { size: 8 }),
+                "int" => Some(BasicTypeData { size: 8 }),
+                "bool" => Some(BasicTypeData { size: 1 }),
+                other => unreachable!("invalid builtin type: {}", other),
+            },
+            EitherTypeId::Custom(custom) => {
+                let typedata = self.typedata.get(&custom)?;
+                Some(BasicTypeData { size: typedata.size })
+            }
+        }
+    }
+}
+
+pub(crate) enum EitherTypeName {
+    Builtin(&'static str),
+    Custom(Identifier)
+}
+
+impl From<&'static str> for EitherTypeName {
+    fn from(value: &'static str) -> Self {
+        Self::Builtin(value)
+    }
+}
+
+impl From<Identifier> for EitherTypeName {
+    fn from(value: Identifier) -> Self {
+        Self::Custom(value)
+    }
+}
+
+pub(crate) enum EitherTypeId {
+    Builtin(&'static str),
+    Custom(TypeId)
+}
+
+impl From<&'static str> for EitherTypeId {
+    fn from(value: &'static str) -> Self {
+        Self::Builtin(value)
+    }
+}
+
+impl From<TypeId> for EitherTypeId {
+    fn from(value: TypeId) -> Self {
+        Self::Custom(value)
     }
 }
 
@@ -171,18 +233,20 @@ impl BuiltinType {
 impl From<BuiltinType> for TypeId {
     fn from(value: BuiltinType) -> Self {
         match value {
-            BuiltinType::Int => 1,
-            BuiltinType::Bool => 2,
+            BuiltinType::Int => 2,
+            BuiltinType::Bool => 3,
         }
     }
 }
 
 impl From<TypeId> for BuiltinType {
+    #[track_caller]
     fn from(value: TypeId) -> Self {
         match value {
-            1 => BuiltinType::Int,
-            2 => BuiltinType::Bool,
-            _ => unreachable!()
+            // 1 => BuiltinType::Type,
+            2 => BuiltinType::Int,
+            3 => BuiltinType::Bool,
+            other => unreachable!("invalid type id: {}", other)
         }
     }
 }
@@ -190,14 +254,17 @@ impl From<TypeId> for BuiltinType {
 /// comptime data for a value
 #[derive(Clone)]
 pub(crate) struct ComptimeInfo {
-    typeid: TypeId,
-    comptime: bool,
-    data: Vec<u8>,
+    pub typeid: TypeId,
+    pub comptime: bool,
+    pub data: Vec<u8>, // comptime fields
 }
 
 impl ComptimeInfo {
-    pub const fn minimal(typeid: TypeId, comptime: bool) -> Self {
+    pub const fn simple(typeid: TypeId, comptime: bool) -> Self {
         Self { typeid, comptime, data: Vec::new() }
+    }
+    pub const fn full(typeid: TypeId, comptime: bool, data: Vec<u8>) -> Self {
+        Self { typeid, comptime, data }
     }
 }
 
@@ -210,8 +277,52 @@ pub(crate) struct State<'a, I> {
 
 impl<'a, I> State<'a, I> {
 
+    pub fn call<A: BridgedCompound, B: BridgedCompound>(&mut self, fun: impl FnOnce(A) -> B) -> Result<(), TypeError> {
+
+        let mut items = Vec::new();
+        let mut comptime = true;
+
+        for want in A::TYPEIDS {
+            
+            if let Some(got) = self.pop() {
+                let valid = *want == got.info.typeid || *want == 0; // todo: don't hardocde `0` for `any`
+                if valid {
+                    comptime &= got.info.comptime;
+                    items.push(got);
+                    continue;
+                }
+            }
+
+            return Err(TypeError::expect(
+                A::TYPEIDS.iter().map(|typeid| ComptimeInfo::simple(*typeid, false)).collect(),
+                items.into_iter().map(|it| it.info).collect())
+            )
+
+        }
+
+        items.reverse();
+
+        if comptime {
+
+            let input  = A::from_rough(items);
+            let output = fun(input);
+            let result = B::into_rough(output);
+            for item in result {
+                self.push(item);
+            }
+
+        } else {
+
+            for typeid in A::TYPEIDS {
+                self.push(Item::runtime(*typeid))
+            }
+
+        };
+        Ok(())
+    }
+
     pub fn push(&mut self, item: Item) {
-        let data = if item.data.is_empty() {
+        let data = if !item.info.comptime {
             let size = BuiltinType::from(item.info.typeid).size();
             let mut data = Vec::with_capacity(size);
             data.resize(size, 0);
@@ -335,11 +446,11 @@ impl<'a, I> State<'a, I> {
         if item1.comptime && item2.comptime {
             self.common.math_op_1(op);
             self.items.truncate(self.items.len() - 2);
-            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), true));
+            self.items.push(ComptimeInfo::simple(BuiltinType::Int.into(), true));
         } else {
             self.common.shrink_by(8 * 2); // todo: use actual size
             self.items.truncate(self.items.len() - 2);
-            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), false));
+            self.items.push(ComptimeInfo::simple(BuiltinType::Int.into(), false));
         }
         Ok(())
     }
@@ -358,13 +469,35 @@ impl<'a, I> State<'a, I> {
         if item1.comptime && item2.comptime {
             self.common.math_op_2(op);
             self.items.truncate(self.items.len() - 2);
-            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), true));
-            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), true));
+            self.items.push(ComptimeInfo::simple(BuiltinType::Int.into(), true));
+            self.items.push(ComptimeInfo::simple(BuiltinType::Int.into(), true));
         } else {
             self.common.shrink_by(8 * 2); // todo: use actual size
             self.items.truncate(self.items.len() - 2);
-            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), false));
-            self.items.push(ComptimeInfo::minimal(BuiltinType::Int.into(), false));
+            self.items.push(ComptimeInfo::simple(BuiltinType::Int.into(), false));
+            self.items.push(ComptimeInfo::simple(BuiltinType::Int.into(), false));
+        }
+        Ok(())
+    }
+
+    /// A general wrapper for a builtin boolean operation of
+    /// the signature (bool bool -> bool)
+    fn bool_op_1(&mut self, op: impl FnOnce(bool, bool) -> bool) -> Result<(), TypeError> {
+        let item1 = self.peek(0).ok_or(TypeError::unspecified())?;
+        let item2 = self.peek(1).ok_or(TypeError::unspecified())?;
+        if item1.typeid != BuiltinType::Bool.into() ||
+           item2.typeid != BuiltinType::Bool.into() {
+            return Err(TypeError::expect_types(vec![BuiltinType::Bool, BuiltinType::Bool], vec![item1.clone(), item2.clone()]))
+        }
+        // comptime or runtime
+        if item1.comptime && item2.comptime {
+            self.common.bool_op_1(op);
+            self.items.truncate(self.items.len() - 2);
+            self.items.push(ComptimeInfo::simple(BuiltinType::Bool.into(), true));
+        } else {
+            self.common.shrink_by(8 * 2); // todo: use actual size
+            self.items.truncate(self.items.len() - 2);
+            self.items.push(ComptimeInfo::simple(BuiltinType::Bool.into(), false));
         }
         Ok(())
     }
@@ -385,6 +518,10 @@ impl<'a, I> State<'a, I> {
         self.math_op_2(|lhs, rhs| (lhs / rhs, lhs % rhs))
     }
 
+    pub fn not(&mut self) -> Result<(), TypeError> {
+        todo!();
+    }
+
 }
 
 // a value that was popped from the stack
@@ -392,15 +529,15 @@ impl<'a, I> State<'a, I> {
 #[derive(Clone)]
 pub(crate) struct Item {
     pub info: ComptimeInfo,
-    data: Vec<u8>, // todo: use tinyvec / stackvec for Vec<u8>
+    pub data: Vec<u8>, // runtime data, todo: use tinyvec / stackvec for Vec<u8>
 }
 
 impl Item {
     pub const fn comptime(typeid: TypeId, data: Vec<u8>) -> Self {
-        Self { info: ComptimeInfo::minimal(typeid, true), data }
+        Self { info: ComptimeInfo::simple(typeid, true), data }
     }
     pub const fn runtime(typeid: TypeId) -> Self {
-        Self { info: ComptimeInfo::minimal(typeid, false), data: Vec::new() }
+        Self { info: ComptimeInfo::simple(typeid, false), data: Vec::new() }
     }
 }
 
@@ -413,7 +550,7 @@ pub(crate) fn usize_from_bytes(value: Vec<u8>) -> usize {
 }
 
 pub(crate) fn bool_to_bytes(value: bool) -> Vec<u8> {
-    vec![value as u8]
+    [value as u8].to_vec()
 }
 
 pub(crate) fn bool_from_bytes(value: Vec<u8>) -> bool {
@@ -437,7 +574,7 @@ impl TypeError {
     }
     pub(crate) fn expect_types(want: Vec<BuiltinType>, got: Vec<ComptimeInfo>) -> Self {
         Self::unspanned(TypeErrorKind::Expect {
-            want: want.into_iter().map(|t| ComptimeInfo::minimal(t.into(), false)).collect(),
+            want: want.into_iter().map(|t| ComptimeInfo::simple(t.into(), false)).collect(),
             got
         })
     }
@@ -478,8 +615,8 @@ pub(crate) fn format_error(value: TypeError) -> Diagnostic {
 
 fn format_metadata(mds: Vec<ComptimeInfo>) -> String {
     format!("{:?}", mds.into_iter().map(|it| {
-        if it.comptime { format!("comptime id {:?}", BuiltinType::from(it.typeid)) } // todo: format using actual names
-        else { format!("id {:?}", BuiltinType::from(it.typeid)) }
+        if it.comptime { format!("comptime id {:?}", it.typeid) } // todo: format using actual names
+        else { format!("id {:?}", it.typeid) }
     }).collect::<Vec<_>>())
 }
 
