@@ -11,7 +11,7 @@ pub mod common;
 pub mod typegen;
 pub mod eval;
 
-use std::{env, fmt, fs, path, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time, collections::HashMap, ffi::OsString};
+use std::{io, env, fmt, path, sync::{Arc, atomic::{AtomicBool, Ordering}}, thread, time, collections::HashMap, ffi::OsString};
 use arch::{Intrinsic, Intel64};
 use basegen::Program;
 use diagnostic::Diagnostic;
@@ -58,7 +58,6 @@ fn main() {
         executor: async_executor::Executor::new(),
         cache: async_lock::RwLock::new(HashMap::new()),
         io: uring_fs::IoUring::new().expect("create io_uring context"),
-        // rio: { rio::Config { print_profile_on_drop: true, depth: 1, ..Default::default() } }.start().expect("create io_uring context"),
     });
 
     // asynchronously compile the program
@@ -115,8 +114,8 @@ fn main() {
         .emit();
 
     // get the result of the task which compiled the main module
-    // note: this will potentially still need to run the `barrier.wait().await` inside the main task
-    // if all worker threads exited as soon as the barrier became free
+    // note: this will potentially still need to run the `barrier.wait().await` inside the
+    // main task, if all worker threads stopped as soon as the barrier became free
     let result = match future::block_on(unique.executor.run(task)) {
         Ok(val) => val,
         Err(()) => return,
@@ -223,7 +222,7 @@ fn compile<I: Intrinsic + Send + Sync + 'static>(shared: Arc<SharedState<'static
                 return Err(())
             }
         };
-
+        
         let source = match parser::parse(&content) {
             Ok(val) => val,
             Err(err) => {
@@ -310,7 +309,13 @@ fn split_path(path: path::PathBuf) -> Option<(path::PathBuf, OsString)> {
 
 async fn read_to_string(path: &path::Path, io: &uring_fs::IoUring) -> Result<String, Diagnostic> {
 
-    let file = match unsafe { io.open(path, uring_fs::OpenOptions::READ).await } {
+    let info_and_file = async {
+        let info = io.stat(path).await?;
+        let file = io.open(path, uring_fs::Flags::RDONLY).await?;
+        io::Result::Ok((info, file))
+    };
+
+    let (info, file) = match info_and_file.await {
         Ok(val) => val,
         Err(err) => {
             return Err(Diagnostic::error("cannot open file")
@@ -318,14 +323,20 @@ async fn read_to_string(path: &path::Path, io: &uring_fs::IoUring) -> Result<Str
         }
     };
 
-    match io.read_to_string(&file).await {
-        Ok(val) => Ok(val),
-        Err(err) if uring_fs::is_not_utf8(&err) => {
-            Err(Diagnostic::error("file is not utf8")
+    let content = match io.read(&file, info.size()).await {
+        Ok(val) => val,
+        Err(err) => {
+            return Err(Diagnostic::error("cannot read file")
                 .note(err.to_string().to_lowercase()))
         }
+    };
+
+    // let content = std::fs::read(path).unwrap();
+
+    match String::from_utf8(content) {
+        Ok(val) => Ok(val),
         Err(err) => {
-            Err(Diagnostic::error("cannot read file")
+            return Err(Diagnostic::error("file is not valid utf8")
                 .note(err.to_string().to_lowercase()))
         }
     }
@@ -396,7 +407,7 @@ pub(crate) mod arch {
                 _other => None,
             }
         }
-        fn typegen(&self, state: &mut typegen::State<Self>) {
+        fn typegen(&self, _state: &mut typegen::State<Self>) {
             todo!("typecheck Intel64 intrinsic")
         }
     }
